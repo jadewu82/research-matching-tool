@@ -16,6 +16,10 @@ export function createServer(fetcher = fetch) {
       });
       res.end(JSON.stringify(data));
     };
+    if (req.method === "GET" && req.url === "/api/health") {
+      send(200, { status: "ok", fullTextApiVersion: 2 });
+      return;
+    }
     if (req.method === "POST" && req.url === "/api/full-text") {
       try {
         let body = "";

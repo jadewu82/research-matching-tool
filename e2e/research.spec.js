@@ -328,3 +328,96 @@ test("unavailable full text is not replaced with an abstract and can be retried"
     "ABSTRACT ONLY CLAIM",
   );
 });
+
+test("unavailable provider coverage can be resolved by importing full text privately", async ({
+  page,
+}) => {
+  const requests = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST") requests.push(r.postData() || "");
+  });
+  await page.route("**/api/articles", (route) =>
+    route.fulfill({
+      json: {
+        articles: [
+          { ...article, fullText: undefined, abstract: "ABSTRACT ONLY CLAIM" },
+          { ...article, doi: "10.1234/b", title: "Second article" },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/full-text", (route) =>
+    route.fulfill({
+      json: {
+        fullText: {
+          status: "unavailable",
+          retryable: false,
+          reason: "No downloadable full text is available.",
+          sections: [],
+        },
+      },
+    }),
+  );
+  await page.goto("/");
+  await page.getByLabel("Title, topic, materials, and methods").fill("Growth");
+  await page
+    .getByLabel("Organized findings", { exact: true })
+    .fill("Growth 4 cm");
+  await page.getByRole("button", { name: /Find research connections/ }).click();
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page
+    .getByRole("button", { name: "Compare articles", exact: true })
+    .click();
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page
+    .getByRole("button", {
+      name: `Import full text for ${article.title}`,
+      exact: true,
+    })
+    .click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles({
+    name: "article-body.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from(
+      "Abstract\nABSTRACT ONLY CLAIM\nIntroduction\nWe assessed growth.\nMethods\nWe measured 60 plants using calibrated sensors.\nResults\nGrowth increased by 8 cm.\nLimitations\nThe small sample limits generalization.\nReferences\nCITATION CLAIM",
+    ),
+  });
+  const table = page.getByRole("dialog").getByRole("table");
+  await expect(table).toContainText("60 plants");
+  await expect(table).toContainText("8 cm");
+  await expect(table).toContainText("User-provided full text");
+  await expect(table).not.toContainText("ABSTRACT ONLY CLAIM");
+  await expect(table).not.toContainText("CITATION CLAIM");
+  expect(requests.join(" ")).not.toContain("calibrated sensors");
+});
+test("an outdated backend is reported as a server version issue", async ({
+  page,
+}) => {
+  await page.route("**/api/articles", (route) =>
+    route.fulfill({
+      json: {
+        articles: [
+          { ...article, fullText: undefined },
+          { ...article, doi: "10.1234/b", title: "Second article" },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/full-text", (route) =>
+    route.fulfill({ status: 404, json: { error: "Not found" } }),
+  );
+  await page.goto("/");
+  await page.getByLabel("Title, topic, materials, and methods").fill("Growth");
+  await page
+    .getByLabel("Organized findings", { exact: true })
+    .fill("Growth 4 cm");
+  await page.getByRole("button", { name: /Find research connections/ }).click();
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page
+    .getByRole("button", { name: "Compare articles", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "The running server does not support full-text retrieval.",
+  );
+});

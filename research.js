@@ -128,19 +128,33 @@ export function articleEvidence(article) {
       type: section.type,
     })),
   );
-  const summary = (headingPattern, sentencePattern, fallback = false) => {
+  const summary = (
+    headingPattern,
+    sentencePattern,
+    fallback = false,
+    excludePattern = /$^/,
+  ) => {
     const headed = full.filter((s) =>
       headingPattern.test(`${s.heading} ${s.type || ""}`),
     );
     const pool = headed.length
       ? headed
-      : full.filter((s) => sentencePattern.test(s.text));
+      : full.filter(
+          (s) =>
+            !excludePattern.test(`${s.heading} ${s.type || ""}`) &&
+            sentencePattern.test(s.text),
+        );
     const prioritized = pool
       .map((sentence, index) => ({
         ...sentence,
         index,
         score:
           (sentencePattern.test(sentence.text) ? 3 : 0) +
+          (/\b(we (?:aim|hypothes|investigat|evaluat|assess)|(?:this|our) study|our (?:objective|aim)|we note.*limitation)/i.test(
+            sentence.text,
+          )
+            ? 7
+            : 0) +
           (/\d/.test(sentence.text) ? 1 : 0),
       }))
       .sort((a, b) => b.score - a.score || a.index - b.index)
@@ -173,8 +187,10 @@ export function articleEvidence(article) {
       true,
     ),
     methods: summary(
-      /method|material|experimental|protocol/i,
+      /method|material|experimental|protocol|data extraction|eligibility|statistical analysis/i,
       /\b(randomi[sz]|assay|microscop|cohort|regression|anova|survey|interview|we used|we analy[sz])/i,
+      false,
+      /result|discussion|conclu|intro|background/i,
     ),
     findings: summary(
       /result|finding|conclu/i,
@@ -187,6 +203,8 @@ export function articleEvidence(article) {
     limitations: summary(
       /limitation|caveat/i,
       /\b(limit|small sample|uncertain|bias|caution|further research|future work)/i,
+      false,
+      /intro|background/i,
     ),
   };
   return {
@@ -204,6 +222,8 @@ export function articleEvidence(article) {
     ),
     hasFullText: sections.length > 0,
     fullTextSourceUrl: article.fullText?.sourceUrl,
+    sourceProvider: article.fullText?.provider || "",
+    supplied: !!article.fullText?.supplied,
     fullTextMessage:
       article.fullText?.reason ||
       "Full text unavailable. Retrieve accessible full text to populate section summaries.",

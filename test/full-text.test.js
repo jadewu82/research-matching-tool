@@ -79,3 +79,33 @@ test("parser rejects entity declarations instead of resolving external resources
       '<!DOCTYPE article [<!ENTITY x SYSTEM "file:///etc/passwd">]><article><body><p>&x;</p></body></article>',
     ),
   ));
+
+test("nested sections without sec-type retain their parent method context", () => {
+  const sections = parseFullText(
+    "<article><body><sec><title>Results</title><p>We used regression and found a 7% increase.</p></sec><sec><title>Materials and Methods</title><sec><title>Data Extraction</title><p>Two reviewers independently collected the measurements.</p></sec><sec><title>Analysis</title><p>A prespecified model adjusted for publication date.</p></sec></sec></body></article>",
+  );
+  const evidence = articleEvidence({
+    title: "Nested paper",
+    fullText: { status: "available", sections },
+  });
+  assert.match(evidence.methods.join(" "), /Two reviewers/);
+  assert.match(evidence.methods.join(" "), /prespecified model/);
+  assert.doesNotMatch(evidence.methods.join(" "), /7% increase/);
+  assert.match(
+    evidence.sourceSections.methods.join(" "),
+    /Materials and Methods/,
+  );
+});
+
+test("provided text excludes abstract and bibliography and requires real article sections", async () => {
+  const { parseProvidedText } = await import("../full-text-parser.js");
+  const sections = parseProvidedText(
+    "Article title\nAUTHOR CLAIM\nAbstract\nABSTRACT CLAIM\n\nIntroduction\nWe assessed growth.\n\nMethods\nTwo reviewers measured 60 plants.\n\nResults\nGrowth was 8 cm.\n\nReferences\nCITATION CLAIM",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(sections),
+    /ABSTRACT CLAIM|CITATION CLAIM|AUTHOR CLAIM/,
+  );
+  assert.match(JSON.stringify(sections), /60 plants/);
+  assert.throws(() => parseProvidedText("Abstract\nOnly a summary."));
+});

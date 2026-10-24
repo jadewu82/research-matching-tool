@@ -39,6 +39,7 @@ import {
   AccordionContent,
 } from "./components/ui/accordion";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
+import { parseFullText, parseProvidedText } from "../full-text-parser.js";
 import { compare, compareArticles, validateRequest } from "../research.js";
 
 const initial = {
@@ -199,6 +200,9 @@ function ArticleComparison({ first, second }) {
               {[result.left, result.right].map((a) => (
                 <th key={a.doi} scope="col">
                   <h3>{a.title}</h3>
+                  {a.sourceProvider && (
+                    <p className="hint">{a.sourceProvider}</p>
+                  )}
                   <p className="hint">
                     {a.authors} · {a.year}
                   </p>
@@ -208,7 +212,10 @@ function ArticleComparison({ first, second }) {
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Read full-text source <ExternalLink size={12} />
+                    {a.hasFullText && !a.supplied
+                      ? "Read full-text source"
+                      : "Publisher source"}{" "}
+                    <ExternalLink size={12} />
                   </a>
                 </th>
               ))}
@@ -264,6 +271,7 @@ export default function App() {
   const [pair, setPair] = useState([null, null]);
   const fullTextCache = useRef(new Map());
   const [retryVersion, setRetryVersion] = useState(0);
+  const [fullTextErrors, setFullTextErrors] = useState({});
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const input = (key, props = {}) => (
     <input
@@ -388,7 +396,7 @@ export default function App() {
         const article = pending[cursor++];
         setArticles((current) =>
           current.map((a) =>
-            a.doi === article.doi
+            a.doi === article.doi && !a.fullText?.supplied
               ? { ...a, fullText: { status: "loading", sections: [] } }
               : a,
           ),
@@ -403,14 +411,26 @@ export default function App() {
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ doi: article.doi }),
                 });
+                if (response.status === 404)
+                  throw new Error(
+                    "The running server does not support full-text retrieval. Pull the latest main branch and rebuild/restart your Codespace container.",
+                  );
+                if (!response.ok)
+                  throw new Error(
+                    `Full-text request failed (HTTP ${response.status}). Check the server log and retry.`,
+                  );
                 const result = await response.json();
-                if (!response.ok || !result.fullText)
-                  throw new Error("Full text unavailable");
+                if (!result.fullText)
+                  throw new Error(
+                    "The server returned an invalid full-text response. Rebuild/restart your Codespace container.",
+                  );
                 return result.fullText;
-              } catch {
+              } catch (error) {
                 return {
                   status: "unavailable",
+                  retryable: true,
                   reason:
+                    error.message ||
                     "Full text could not be retrieved. Please retry. Abstracts are not used for comparisons.",
                   sections: [],
                 };
@@ -419,7 +439,11 @@ export default function App() {
           );
         const fullText = await fullTextCache.current.get(article.doi);
         setArticles((current) =>
-          current.map((a) => (a.doi === article.doi ? { ...a, fullText } : a)),
+          current.map((a) =>
+            a.doi === article.doi && !a.fullText?.supplied
+              ? { ...a, fullText }
+              : a,
+          ),
         );
       }
     }
@@ -435,6 +459,45 @@ export default function App() {
       current.map((a) => (a.doi === doi ? { ...a, fullText: undefined } : a)),
     );
     setRetryVersion((value) => value + 1);
+  }
+  async function importArticleFullText(article, files) {
+    const file = files?.[0];
+    if (!file) return;
+    try {
+      if (
+        !/\.(txt|xml)$/i.test(file.name) ||
+        file.size > (/\.xml$/i.test(file.name) ? 4000000 : 2000000)
+      )
+        throw new Error(
+          "Choose a full article-body TXT file up to 2 MB or JATS XML file up to 4 MB. PDF files are not supported.",
+        );
+      const text = await file.text();
+      const sections = /\.xml$/i.test(file.name)
+        ? parseFullText(text)
+        : parseProvidedText(text);
+      if (!sections.length)
+        throw new Error(
+          "No article-body sections were found. Abstract-only files cannot be compared.",
+        );
+      const fullText = {
+        status: "available",
+        supplied: true,
+        provider: "User-provided full text",
+        fileName: file.name,
+        sourceUrl: article.url,
+        sections,
+      };
+      fullTextCache.current.set(article.doi, Promise.resolve(fullText));
+      setArticles((current) =>
+        current.map((a) => (a.doi === article.doi ? { ...a, fullText } : a)),
+      );
+      setFullTextErrors((current) => ({ ...current, [article.doi]: "" }));
+    } catch (error) {
+      setFullTextErrors((current) => ({
+        ...current,
+        [article.doi]: error.message,
+      }));
+    }
   }
   function openComparison(kind) {
     setPair([chosen[0]?.doi, chosen[1]?.doi]);
@@ -1003,22 +1066,48 @@ export default function App() {
                     Retrieving full text for selected articles…
                   </p>
                 )}
-                {activeArticles
-                  .filter((a) => a.fullText?.status === "unavailable")
-                  .map((a) => (
-                    <div className="evidence-warning" key={a.doi}>
-                      <p>
-                        {a.title}: {a.fullText.reason}
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => retryFullText(a.doi)}
+                {activeArticles.map((a) => (
+                  <div className="comparison-card" key={a.doi}>
+                    <h3>{a.title}</h3>
+                    <p className="hint">
+                      {a.fullText?.status === "available"
+                        ? `Full text ready · ${a.fullText.provider || "Full article body"}${a.fullText.fileName ? " · " + a.fullText.fileName : ""}`
+                        : a.fullText?.reason || "Retrieving full text…"}
+                    </p>
+                    <div className="flex flex-wrap gap-3 mt-3">
+                      {a.fullText?.status === "unavailable" &&
+                        a.fullText.retryable !== false && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => retryFullText(a.doi)}
+                          >
+                            Retry full text for {a.title}
+                          </Button>
+                        )}
+                      <FileTrigger
+                        acceptedFileTypes={[".txt", ".xml"]}
+                        onSelect={(files) => importArticleFullText(a, files)}
                       >
-                        Retry full text for {a.title}
-                      </Button>
+                        <AriaButton className="text-sm underline underline-offset-4">
+                          Import full text for {a.title}
+                        </AriaButton>
+                      </FileTrigger>
                     </div>
-                  ))}
+                    <p className="hint">
+                      You can supply an article-body TXT (2 MB) or JATS XML (4
+                      MB) file you have access to. TXT files need section
+                      headings such as Introduction, Methods and Results. Files
+                      stay in this browser; abstracts and references are
+                      excluded.
+                    </p>
+                    {fullTextErrors[a.doi] && (
+                      <p className="error" role="alert">
+                        {fullTextErrors[a.doi]}
+                      </p>
+                    )}
+                  </div>
+                ))}
                 {comparison === "experiment" && experiment && (
                   <>
                     <p className="field-label mt-5">Your organized findings</p>
@@ -1084,10 +1173,12 @@ export default function App() {
                   </p>
                   <p className="hint">
                     Coverage is currently limited to open-access full text
-                    available through Europe PMC. Section summaries are
-                    extractive and may omit details. Check the linked full text
-                    before interpreting differences. Statistical software is
-                    recorded as context and is not executed.
+                    available through Europe PMC or full text you import.
+                    Imported content is provided by you and is not independently
+                    verified. Section summaries are extractive and may omit
+                    details. Check the linked full text before interpreting
+                    differences. Statistical software is recorded as context and
+                    is not executed.
                   </p>
                 </div>
               </TabsContent>
