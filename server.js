@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { normalizeDoi, normalizeWork, validateRequest } from "./research.js";
 
+import { enrichPeerReview } from "./peer-review.js";
+
 export function createServer(fetcher = fetch) {
   return http.createServer(async (req, res) => {
     const send = (status, data) => {
@@ -71,7 +73,11 @@ export function createServer(fetcher = fetch) {
           if (filters.length) params.set("filter", filters.join(","));
           works = (await get("?" + params)).items;
         }
-        send(200, { articles: works.map(normalizeWork), source: "Crossref" });
+        const enriched = await enrichPeerReview(works, fetcher);
+        send(200, {
+          articles: enriched.map(normalizeWork),
+          source: "Crossref; DOAJ journal policies where available",
+        });
       } catch (error) {
         send(502, {
           error:

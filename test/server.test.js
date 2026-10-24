@@ -83,3 +83,49 @@ test("provider failure is actionable instead of producing fake results", async (
   assert.equal(response.status, 502);
   assert.match((await response.json()).error, /not found/);
 });
+
+test("API includes sourced peer-review evidence from matching DOAJ journal", async (t) => {
+  const server = createServer(async (url) => ({
+    ok: true,
+    json: async () =>
+      url.startsWith("https://doaj.org/")
+        ? {
+            results: [
+              {
+                bibjson: {
+                  identifier: [{ id: "1932-6203" }],
+                  editorial: {
+                    review_process: ["Single anonymous peer review"],
+                  },
+                },
+              },
+            ],
+          }
+        : {
+            message: {
+              DOI: "10.1234/test",
+              title: ["Test"],
+              type: "journal-article",
+              ISSN: ["1932-6203"],
+            },
+          },
+  }));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}/api/articles`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "analyze",
+        context: "Plant research",
+        data: "Growth 4 cm",
+        dois: ["10.1234/test"],
+      }),
+    },
+  );
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.articles[0].peerReview.status, "journal-policy");
+  assert.match(result.articles[0].peerReview.sourceUrl, /doaj.org/);
+});

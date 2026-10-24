@@ -130,3 +130,67 @@ test("provider errors preserve form and permit retry", async ({ page }) => {
     page.getByRole("button", { name: /Find research connections/ }),
   ).toBeEnabled();
 });
+
+test("mobile article comparison shows distinct evidence, peer-review provenance and missing abstracts", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const records = [
+    {
+      ...article,
+      abstract:
+        "We randomized 40 plants to drought treatment. Results showed growth increased by 12.5 cm.",
+      peerReview: {
+        status: "journal-policy",
+        label: "Peer reviewed (journal policy)",
+        detail: "DOAJ policy, not article-level verification.",
+        sourceUrl: "https://doaj.org/toc/1932-6203",
+      },
+    },
+    {
+      ...article,
+      doi: "10.1234/b",
+      title: "Microscopy plant study",
+      abstract:
+        "We used microscopy on 25 plants. Results showed growth decreased by 3 cm.",
+    },
+    {
+      ...article,
+      doi: "10.1234/c",
+      title: "Study without an abstract",
+      abstract: "",
+    },
+  ];
+  await page.route("**/api/articles", (route) =>
+    route.fulfill({ json: { articles: records } }),
+  );
+  await page.goto("/");
+  await page
+    .getByLabel("Title, topic, materials, and methods")
+    .fill("Plant growth");
+  await page
+    .getByLabel("Organized findings", { exact: true })
+    .fill("Growth: 4 cm");
+  await page.getByRole("button", { name: /Find research connections/ }).click();
+  await expect(
+    page.getByText("Peer reviewed (journal policy)", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page
+    .getByRole("button", { name: "Compare articles", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("table")).toContainText("randomized 40 plants");
+  await expect(dialog.getByRole("table")).toContainText(
+    "microscopy on 25 plants",
+  );
+  await expect(dialog.getByRole("table")).toContainText("12.5 cm");
+  await expect(dialog.getByRole("table")).toContainText("3 cm");
+  await page.getByLabel("Article B", { exact: true }).selectOption("10.1234/c");
+  await expect(dialog).toContainText("no abstract available");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});

@@ -39,7 +39,7 @@ import {
   AccordionContent,
 } from "./components/ui/accordion";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
-import { compare, validateRequest } from "../research.js";
+import { compare, compareArticles, validateRequest } from "../research.js";
 
 const initial = {
   context: "",
@@ -77,7 +77,27 @@ function ComparisonCard({ title, result }) {
   return (
     <article className="comparison-card">
       <h3>{title}</h3>
-      <p className="field-label">Shared terms</p>
+      {result.article && (
+        <>
+          <p className="field-label">Methods reported in the article</p>
+          <EvidenceList items={result.article.methods} />
+          <p className="field-label mt-4">Findings reported in the article</p>
+          <EvidenceList items={result.article.findings} />
+          <p className="field-label mt-4">
+            Measurements reported in the article
+          </p>
+          <EvidenceList items={result.article.measurements} />
+          <a
+            className="evidence-link"
+            href={result.article.url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Read original source <ExternalLink size={12} />
+          </a>
+        </>
+      )}
+      <p className="field-label mt-4">Shared terms with your experiment</p>
       <div className="badges">
         {result.sharedTerms.length ? (
           result.sharedTerms.map((term) => (
@@ -95,6 +115,180 @@ function ComparisonCard({ title, result }) {
     </article>
   );
 }
+function PeerReviewLabel({ article }) {
+  const review =
+    article.peerReview && typeof article.peerReview === "object"
+      ? article.peerReview
+      : {
+          status: "unverified",
+          label: "Peer review unverified",
+          detail:
+            "No review-policy evidence available. This does not mean the article was not peer reviewed.",
+        };
+  return (
+    <div className="review-status">
+      <Badge
+        variant={review.status === "journal-policy" ? "secondary" : "outline"}
+      >
+        {review.label}
+      </Badge>
+      <p className="hint">{review.detail}</p>
+      {review.sourceUrl && (
+        <a
+          className="evidence-link"
+          href={review.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          DOAJ journal-policy source <ExternalLink size={12} />
+        </a>
+      )}
+    </div>
+  );
+}
+function EvidenceList({ items }) {
+  return items?.length ? (
+    <ul className="evidence-excerpts">
+      {items.map((item, i) => (
+        <li key={i}>{item}</li>
+      ))}
+    </ul>
+  ) : (
+    <p className="hint">
+      Not identified in the available abstract. Check the full text.
+    </p>
+  );
+}
+function ArticleComparison({ first, second }) {
+  if (!first || !second)
+    return <p>Select at least two distinct articles to compare.</p>;
+  const result = compareArticles(first, second);
+  const rows = [
+    ["Research focus", "focus"],
+    ["Study methods", "methods"],
+    ["Reported findings", "findings"],
+    ["Reported measurements", "measurements"],
+    ["Stated limitations", "limitations"],
+  ];
+  return (
+    <section aria-label="Side-by-side article evidence">
+      {result.coverage.length > 0 && (
+        <div className="evidence-warning" role="status">
+          {result.coverage.map((note) => (
+            <p key={note}>{note}</p>
+          ))}
+        </div>
+      )}
+      <p className="hint">
+        Excerpts below are copied from available abstracts and selected using
+        text patterns. Missing excerpts do not mean the article lacks those
+        details.
+      </p>
+      <div
+        className="comparison-table-wrapper"
+        tabIndex={0}
+        aria-label="Scrollable article comparison"
+      >
+        <table className="comparison-table">
+          <caption>Published evidence, side by side</caption>
+          <thead>
+            <tr>
+              <th scope="col">Compare</th>
+              {[result.left, result.right].map((a) => (
+                <th key={a.doi} scope="col">
+                  <h3>{a.title}</h3>
+                  <p className="hint">
+                    {a.authors} · {a.year}
+                  </p>
+                  <a
+                    className="evidence-link"
+                    href={a.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Read original source <ExternalLink size={12} />
+                  </a>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Peer review</th>
+              {[result.left, result.right].map((a) => (
+                <td key={a.doi}>{a.peerReview}</td>
+              ))}
+            </tr>
+            {rows.map(([label, key]) => (
+              <tr key={key}>
+                <th scope="row">{label}</th>
+                <td>
+                  <EvidenceList items={result.left[key]} />
+                </td>
+                <td>
+                  <EvidenceList items={result.right[key]} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="comparison-card">
+        <h3>Topic overlap</h3>
+        <div className="badges">
+          {result.sharedTerms.length ? (
+            result.sharedTerms.map((term) => (
+              <Badge variant="secondary" key={term}>
+                {term}
+              </Badge>
+            ))
+          ) : (
+            <p className="hint">No shared terms detected.</p>
+          )}
+        </div>
+        <p className="hint">
+          Shared words indicate topical overlap, not agreement between the
+          findings.
+        </p>
+        <div className="two-col">
+          <div>
+            <p className="field-label">Terms specific to Article A</p>
+            <p className="hint">
+              {result.differentTerms.left.join(", ") ||
+                "No distinct terms detected."}
+            </p>
+          </div>
+          <div>
+            <p className="field-label">Terms specific to Article B</p>
+            <p className="hint">
+              {result.differentTerms.right.join(", ") ||
+                "No distinct terms detected."}
+            </p>
+          </div>
+        </div>
+      </div>
+      <div className="comparison-card">
+        <h3>Questions to check in the full text</h3>
+        <ul className="evidence-excerpts">
+          <li>
+            Do the methods, materials, controls and study populations address
+            the same question?
+          </li>
+          <li>
+            Are outcomes measured with comparable definitions, units and time
+            points?
+          </li>
+          <li>
+            Do sample sizes, statistical tests and uncertainty support comparing
+            the reported findings?
+          </li>
+        </ul>
+        <p className="hint">{result.limitation}</p>
+      </div>
+    </section>
+  );
+}
+
 export default function App() {
   const [form, setForm] = useState(initial),
     [mode, setMode] = useState("find"),
@@ -110,6 +304,7 @@ export default function App() {
     [sort, setSort] = useState("relevance"),
     [experiment, setExperiment] = useState(null),
     [comparison, setComparison] = useState(null);
+  const [pair, setPair] = useState([null, null]);
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const input = (key, props = {}) => (
     <input
@@ -212,14 +407,14 @@ export default function App() {
           experiment.statistics,
         ),
       });
-  if (comparison === "articles")
-    for (let i = 0; i < chosen.length; i++)
-      for (let j = i + 1; j < chosen.length; j++)
-        panels.push({
-          key: `${i}-${j}`,
-          title: `${chosen[i].title} ↔ ${chosen[j].title}`,
-          result: compare(chosen[i], chosen[j].title, chosen[j].abstract),
-        });
+  const first = chosen.find((a) => a.doi === pair[0]) || chosen[0];
+  const second =
+    chosen.find((a) => a.doi === pair[1] && a.doi !== first?.doi) ||
+    chosen.find((a) => a.doi !== first?.doi);
+  function openComparison(kind) {
+    setPair([chosen[0]?.doi, chosen[1]?.doi]);
+    setComparison(kind);
+  }
   return (
     <>
       <header className="topbar">
@@ -501,9 +696,10 @@ export default function App() {
                               </Field>
                             </div>
                             <p className="hint">
-                              Crossref does not reliably identify review
-                              articles or verify peer review. Check these
-                              details with the publisher.
+                              Review articles cannot be reliably separated by
+                              Crossref. DOAJ journal-policy evidence is shown
+                              where available; missing verification does not
+                              mean an article was not peer reviewed.
                             </p>
                           </AccordionContent>
                         </AccordionItem>
@@ -544,7 +740,7 @@ export default function App() {
                   </p>
                   {busy && (
                     <div role="status" className="hint">
-                      Retrieving publisher metadata. This may take up to 20
+                      Retrieving publisher metadata. This may take up to 30
                       seconds.
                     </div>
                   )}
@@ -670,7 +866,7 @@ export default function App() {
                         </AccordionItem>
                       </Accordion>
                       <div className="flex justify-between items-center mt-4 gap-3">
-                        <span className="hint m-0">Peer review: unknown</span>
+                        <PeerReviewLabel article={article} />
                         <Button variant="ghost" size="sm" asChild>
                           <a
                             href={article.url}
@@ -713,14 +909,14 @@ export default function App() {
                 <hr className="border-border my-5" />
                 <Button
                   disabled={!chosen.length}
-                  onClick={() => setComparison("experiment")}
+                  onClick={() => openComparison("experiment")}
                 >
                   Compare with my findings
                 </Button>
                 <Button
                   variant="outline"
                   disabled={chosen.length < 2}
-                  onClick={() => setComparison("articles")}
+                  onClick={() => openComparison("articles")}
                 >
                   Compare articles
                 </Button>
@@ -779,18 +975,62 @@ export default function App() {
                     <pre className="findings">{experiment.data}</pre>
                   </>
                 )}
-                {panels.map((panel) => (
-                  <ComparisonCard key={panel.key} {...panel} />
-                ))}
+                {comparison === "articles" ? (
+                  <>
+                    <div className="two-col mt-5">
+                      {[
+                        ["Article A", first, 0],
+                        ["Article B", second, 1],
+                      ].map(([label, article, index]) => (
+                        <Field
+                          key={label}
+                          label={label}
+                          id={`compare-${index}`}
+                        >
+                          <select
+                            className="input"
+                            id={`compare-${index}`}
+                            value={article?.doi || ""}
+                            onChange={(event) =>
+                              setPair((current) => {
+                                const next = [...current];
+                                next[index] = event.target.value;
+                                return next;
+                              })
+                            }
+                          >
+                            {chosen.map((a) => (
+                              <option
+                                key={a.doi}
+                                value={a.doi}
+                                disabled={
+                                  a.doi ===
+                                  (index === 0 ? second?.doi : first?.doi)
+                                }
+                              >
+                                {a.title}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      ))}
+                    </div>
+                    <ArticleComparison first={first} second={second} />
+                  </>
+                ) : (
+                  panels.map((panel) => (
+                    <ComparisonCard key={panel.key} {...panel} />
+                  ))
+                )}
               </TabsContent>
               <TabsContent value="evidence">
                 <div className="comparison-card">
                   <h3>What this comparison can tell you</h3>
                   <p className="summary-text">
-                    Connections are shared terms from titles and available
-                    abstracts. They help you find passages worth investigating;
-                    they do not establish scientific agreement, causality, or
-                    comparable effect sizes.
+                    Comparisons show source-attributed excerpts and shared terms
+                    from available abstracts. They help you find passages worth
+                    investigating; they do not establish scientific agreement,
+                    causality, or comparable effect sizes.
                   </p>
                   <p className="hint">
                     Read the full methods, populations, controls, units, and
