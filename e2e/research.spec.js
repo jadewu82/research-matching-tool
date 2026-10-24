@@ -66,10 +66,9 @@ test("search, expand summary, select, compare and close with keyboard", async ({
   await expect(page.getByRole("dialog")).toContainText(
     "Treatment: plant growth 4 cm",
   );
-  await page.getByRole("tab", { name: "Evidence & limits" }).click();
-  await expect(page.getByRole("tabpanel")).toContainText(
-    "do not establish scientific agreement",
-  );
+  await expect(
+    page.getByRole("dialog").getByRole("tab", { name: "Evidence & limits" }),
+  ).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await page.getByRole("button", { name: "Select all" }).click();
@@ -78,6 +77,10 @@ test("search, expand summary, select, compare and close with keyboard", async ({
     .click();
   await expect(page.getByRole("dialog")).toContainText(
     "Articles in conversation",
+  );
+  await page.getByRole("tab", { name: "Evidence & limits" }).click();
+  await expect(page.getByRole("tabpanel")).toContainText(
+    "do not establish scientific agreement",
   );
   expect(errors).toEqual([]);
 });

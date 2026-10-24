@@ -1237,15 +1237,17 @@ export default function App() {
                 <X size={21} />
               </AriaButton>
             </div>
-            <Tabs defaultValue="connections">
-              <TabsList>
-                <TabsTrigger value="connections">
-                  {comparison === "summary"
-                    ? "Section summaries"
-                    : "Connections"}
-                </TabsTrigger>
-                <TabsTrigger value="evidence">Evidence & limits</TabsTrigger>
-              </TabsList>
+            <Tabs key={comparison} defaultValue="connections">
+              {comparison !== "experiment" && (
+                <TabsList>
+                  <TabsTrigger value="connections">
+                    {comparison === "summary"
+                      ? "Section summaries"
+                      : "Connections"}
+                  </TabsTrigger>
+                  <TabsTrigger value="evidence">Evidence & limits</TabsTrigger>
+                </TabsList>
+              )}
               <TabsContent value="connections">
                 {activeArticles.some(
                   (a) => !a.fullText || a.fullText.status === "loading",
@@ -1376,27 +1378,30 @@ export default function App() {
                   ))
                 )}
               </TabsContent>
-              <TabsContent value="evidence">
-                <div className="comparison-card">
-                  <h3>What this comparison can tell you</h3>
-                  <p className="summary-text">
-                    Comparisons summarize sections from accessible full article
-                    bodies. Abstracts are excluded. They help you find passages
-                    worth investigating; they do not establish scientific
-                    agreement, causality, or comparable effect sizes.
-                  </p>
-                  <p className="hint">
-                    Coverage is currently limited to open-access full text
-                    available through Europe PMC, supported Maximum Academic
-                    Press article pages, or full text you import. Imported
-                    content is provided by you and is not independently
-                    verified. Section summaries are extractive and may omit
-                    details. Check the linked full text before interpreting
-                    differences. Statistical software is recorded as context and
-                    is not executed.
-                  </p>
-                </div>
-              </TabsContent>
+              {comparison !== "experiment" && (
+                <TabsContent value="evidence">
+                  <div className="comparison-card">
+                    <h3>What this comparison can tell you</h3>
+                    <p className="summary-text">
+                      Comparisons summarize sections from accessible full
+                      article bodies. Abstracts are excluded. They help you find
+                      passages worth investigating; they do not establish
+                      scientific agreement, causality, or comparable effect
+                      sizes.
+                    </p>
+                    <p className="hint">
+                      Coverage is currently limited to open-access full text
+                      available through Europe PMC, supported Maximum Academic
+                      Press article pages, or full text you import. Imported
+                      content is provided by you and is not independently
+                      verified. Section summaries are extractive and may omit
+                      details. Check the linked full text before interpreting
+                      differences. Statistical software is recorded as context
+                      and is not executed.
+                    </p>
+                  </div>
+                </TabsContent>
+              )}
             </Tabs>
           </Dialog>
         </Modal>
