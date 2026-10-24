@@ -129,3 +129,24 @@ test("API includes sourced peer-review evidence from matching DOAJ journal", asy
   assert.equal(result.articles[0].peerReview.status, "journal-policy");
   assert.match(result.articles[0].peerReview.sourceUrl, /doaj.org/);
 });
+
+test("full-text endpoint accepts a DOI and returns no abstract fallback", async (t) => {
+  const server = createServer(async () => ({
+    ok: true,
+    json: async () => ({ resultList: { result: [] } }),
+  }));
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}/api/full-text`;
+  const response = await fetch(base, {
+    method: "POST",
+    body: JSON.stringify({ doi: "10.1234/a" }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).fullText.status, "unavailable");
+  const bad = await fetch(base, {
+    method: "POST",
+    body: JSON.stringify({ doi: "https://example.com" }),
+  });
+  assert.equal(bad.status, 400);
+});

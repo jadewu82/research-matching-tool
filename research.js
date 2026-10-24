@@ -110,30 +110,85 @@ const terms = (text) =>
         ].includes(t),
     ),
   );
-export function compare(article, context, data, statistics = "") {
-  const literature = terms(`${article.title} ${article.abstract}`);
-  const experiment = terms(`${context} ${data}`);
-  return {
-    sharedTerms: [...experiment].filter((t) => literature.has(t)),
-    statistics: statistics || "Not supplied",
-    limitation:
-      "This textual comparison does not validate or invalidate experimental findings, establish causality, or compare effect sizes. Review full methods, populations, units and uncertainty before interpreting differences.",
-    article: articleEvidence(article),
-    evidence: article.abstract
-      ? "Title and deposited abstract only."
-      : "Title only; abstract unavailable.",
-  };
-}
 
+const sentences = (text) =>
+  text
+    .match(/[^]+?(?:[.!?](?=\s+[A-Z\d])|$)/g)
+    ?.map((s) => s.trim())
+    .filter(Boolean) || [];
 export function articleEvidence(article) {
-  const abstract = article.abstract || "";
-  const sentences =
-    abstract
-      .match(/[^]+?(?:[.!?](?=\s+[A-Z\d])|$)/g)
-      ?.map((s) => s.trim())
-      .filter(Boolean) || [];
-  const extract = (pattern) =>
-    sentences.filter((sentence) => pattern.test(sentence)).slice(0, 3);
+  const sections =
+    article.fullText?.status === "available"
+      ? article.fullText.sections || []
+      : [];
+  const full = sections.flatMap((section) =>
+    sentences(section.text).map((text) => ({
+      text,
+      heading: section.heading,
+      type: section.type,
+    })),
+  );
+  const summary = (headingPattern, sentencePattern, fallback = false) => {
+    const headed = full.filter((s) =>
+      headingPattern.test(`${s.heading} ${s.type || ""}`),
+    );
+    const pool = headed.length
+      ? headed
+      : full.filter((s) => sentencePattern.test(s.text));
+    const prioritized = pool
+      .map((sentence, index) => ({
+        ...sentence,
+        index,
+        score:
+          (sentencePattern.test(sentence.text) ? 3 : 0) +
+          (/\d/.test(sentence.text) ? 1 : 0),
+      }))
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .slice(0, 3)
+      .sort((a, b) => a.index - b.index);
+    const picked = prioritized.length
+      ? prioritized
+      : fallback
+        ? full.slice(0, 2)
+        : [];
+    return {
+      summary: picked.length
+        ? [
+            picked
+              .map((s) =>
+                s.text.length > 450
+                  ? s.text.slice(0, 450).replace(/\s+\S*$/, "") + "…"
+                  : s.text,
+              )
+              .join(" "),
+          ]
+        : [],
+      headings: [...new Set(picked.map((s) => s.heading))],
+    };
+  };
+  const fields = {
+    focus: summary(
+      /intro|background|objective|aim/i,
+      /\b(aim|objective|hypothes|investigat|purpose|research question)/i,
+      true,
+    ),
+    methods: summary(
+      /method|material|experimental|protocol/i,
+      /\b(randomi[sz]|assay|microscop|cohort|regression|anova|survey|interview|we used|we analy[sz])/i,
+    ),
+    findings: summary(
+      /result|finding|conclu/i,
+      /\b(found|show|increas|decreas|associat|significan|observ|improv|reduc)/i,
+    ),
+    measurements: summary(
+      /measure|table|outcome/i,
+      /\d+(?:\.\d+)?\s*(?:%|cm\b|mm\b|mg\b|kg\b|ml\b|nm\b|°|plants?\b|patients?\b|participants?\b)|\bp\s*[<=>]\s*\d|confidence interval|effect size/i,
+    ),
+    limitations: summary(
+      /limitation|caveat/i,
+      /\b(limit|small sample|uncertain|bias|caution|further research|future work)/i,
+    ),
+  };
   return {
     title: article.title,
     url: article.url,
@@ -141,42 +196,62 @@ export function articleEvidence(article) {
     authors: article.authors || "Authors unavailable",
     year: article.year || "Date unavailable",
     peerReview: article.peerReview?.label || "Peer review unverified",
-    focus: abstract ? [sentences[0] || abstract] : [],
-    methods: extract(
-      /\b(method|randomi[sz]|trial|assay|microscop|model|cohort|participant|sampled|measur|experiment|regression|anova|sequenc|survey|interview|used|analy[sz])/i,
+    ...Object.fromEntries(
+      Object.entries(fields).map(([key, value]) => [key, value.summary]),
     ),
-    findings: extract(
-      /\b(result|found|show|increas|decreas|associat|significan|conclu|suggest|observ|improv|reduc)/i,
+    sourceSections: Object.fromEntries(
+      Object.entries(fields).map(([key, value]) => [key, value.headings]),
     ),
-    measurements: extract(
-      /\d+(?:\.\d+)?\s*(?:%|cm\b|mm\b|mg\b|kg\b|ml\b|µ|μ|nm\b|°|plants?\b|patients?\b|participants?\b|subjects?\b)|\b(?:p\s*[<=>]|confidence interval|effect size|odds ratio)\b/i,
-    ),
-    limitations: extract(
-      /\b(limit|small sample|uncertain|bias|caution|further research|future work)/i,
-    ),
-    hasAbstract: !!abstract,
+    hasFullText: sections.length > 0,
+    fullTextSourceUrl: article.fullText?.sourceUrl,
+    fullTextMessage:
+      article.fullText?.reason ||
+      "Full text unavailable. Retrieve accessible full text to populate section summaries.",
+  };
+}
+export function compare(article, context, data, statistics = "") {
+  const evidence = articleEvidence(article),
+    text = Object.values(evidence).filter(Array.isArray).flat().join(" "),
+    literature = terms(text),
+    experiment = terms(`${context} ${data}`);
+  return {
+    sharedTerms: [...experiment].filter((t) => literature.has(t)),
+    statistics: statistics || "Not supplied",
+    article: evidence,
+    evidence: evidence.hasFullText
+      ? "Retrieved full article body; abstract excluded."
+      : evidence.fullTextMessage,
+    limitation:
+      "Extractive full-text summaries provide literature context; this comparison does not validate or invalidate experimental findings or establish causality.",
   };
 }
 export function compareArticles(first, second) {
   const left = articleEvidence(first),
     right = articleEvidence(second);
-  const a = terms(`${first.title} ${first.abstract || ""}`),
-    b = terms(`${second.title} ${second.abstract || ""}`);
+  const body = (a) =>
+    a.hasFullText
+      ? [
+          ...a.focus,
+          ...a.methods,
+          ...a.findings,
+          ...a.measurements,
+          ...a.limitations,
+        ].join(" ")
+      : "";
+  const a = terms(body(left)),
+    b = terms(body(right));
   return {
     left,
     right,
-    sharedTerms: [...a].filter((term) => b.has(term)).slice(0, 16),
+    sharedTerms: [...a].filter((t) => b.has(t)).slice(0, 16),
     differentTerms: {
-      left: [...a].filter((term) => !b.has(term)).slice(0, 10),
-      right: [...b].filter((term) => !a.has(term)).slice(0, 10),
+      left: [...a].filter((t) => !b.has(t)).slice(0, 10),
+      right: [...b].filter((t) => !a.has(t)).slice(0, 10),
     },
     coverage: [left, right]
-      .filter((a) => !a.hasAbstract)
-      .map(
-        (a) =>
-          `${a.title}: no abstract available. Methods, results and measurements cannot be compared from its title alone.`,
-      ),
+      .filter((a) => !a.hasFullText)
+      .map((a) => `${a.title}: full text unavailable. ${a.fullTextMessage}`),
     limitation:
-      "These are attributable abstract excerpts, selected with text patterns, not a full-text or semantic assessment. Different reported findings do not by themselves establish agreement or disagreement. Check methods, populations, controls, units and uncertainty in the original sources.",
+      "Section summaries are extracted from the retrieved full article body, including available tables and figure captions. They are reading aids and do not establish scientific agreement or disagreement.",
   };
 }

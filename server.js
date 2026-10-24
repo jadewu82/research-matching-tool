@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { normalizeDoi, normalizeWork, validateRequest } from "./research.js";
 
+import { retrieveFullText } from "./full-text.js";
 import { enrichPeerReview } from "./peer-review.js";
 
 export function createServer(fetcher = fetch) {
@@ -15,6 +16,24 @@ export function createServer(fetcher = fetch) {
       });
       res.end(JSON.stringify(data));
     };
+    if (req.method === "POST" && req.url === "/api/full-text") {
+      try {
+        let body = "";
+        for await (const chunk of req) {
+          body += chunk;
+          if (Buffer.byteLength(body) > 2000) {
+            send(413, { error: "Request too large." });
+            return;
+          }
+        }
+        const input = JSON.parse(body);
+        const doi = normalizeDoi(input.doi);
+        send(200, { doi, fullText: await retrieveFullText(doi, fetcher) });
+      } catch (error) {
+        send(400, { error: error.message });
+      }
+      return;
+    }
     if (req.method === "POST" && req.url === "/api/articles") {
       let input;
       try {

@@ -62,6 +62,13 @@ test("shows sourced peer-review labels and compares distinct methods and finding
     {
       doi: "10.1234/a",
       title: "Plant treatment trial",
+      fullText: {
+        status: "available",
+        sections: [
+          { heading: "Methods", text: "We randomized 40 plants to treatment." },
+          { heading: "Results", text: "Growth increased by 12.5 cm." },
+        ],
+      },
       authors: "Author A",
       year: 2024,
       url: "https://doi.org/10.1234/a",
@@ -78,6 +85,13 @@ test("shows sourced peer-review labels and compares distinct methods and finding
     {
       doi: "10.1234/b",
       title: "Microscopy growth study",
+      fullText: {
+        status: "available",
+        sections: [
+          { heading: "Methods", text: "We used microscopy on 25 plants." },
+          { heading: "Results", text: "Growth decreased by 3 cm." },
+        ],
+      },
       authors: "Author B",
       year: 2023,
       url: "https://doi.org/10.1234/b",
@@ -93,6 +107,11 @@ test("shows sourced peer-review labels and compares distinct methods and finding
     {
       doi: "10.1234/c",
       title: "Missing abstract study",
+      fullText: {
+        status: "unavailable",
+        reason: "Full text unavailable.",
+        sections: [],
+      },
       authors: "Author C",
       url: "https://doi.org/10.1234/c",
       keywords: [],
@@ -101,12 +120,10 @@ test("shows sourced peer-review labels and compares distinct methods and finding
   ];
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ articles: fixtures }),
-      }),
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ articles: fixtures }),
+    }),
   );
   render(<App />);
   const user = userEvent.setup();
@@ -128,10 +145,10 @@ test("shows sourced peer-review labels and compares distinct methods and finding
   const dialog = await screen.findByRole("dialog");
   expect(dialog).toHaveTextContent("We randomized 40 plants");
   expect(dialog).toHaveTextContent("We used microscopy");
-  expect(dialog).toHaveTextContent("growth increased by 12.5 cm");
-  expect(dialog).toHaveTextContent("growth decreased by 3 cm");
+  expect(dialog).toHaveTextContent("Growth increased by 12.5 cm");
+  expect(dialog).toHaveTextContent("Growth decreased by 3 cm");
   await user.selectOptions(screen.getByLabelText("Article B"), "10.1234/c");
-  expect(dialog).toHaveTextContent("no abstract available");
+  expect(dialog).toHaveTextContent("full text unavailable");
   expect(dialog).not.toHaveTextContent("We used microscopy");
   vi.unstubAllGlobals();
 });

@@ -6,6 +6,15 @@ const article = {
   year: 2024,
   type: "journal-article",
   keywords: ["Growth", "Drought"],
+  fullText: {
+    status: "available",
+    sections: [
+      {
+        heading: "Methods",
+        text: "Plant growth was measured under drought and treatment.",
+      },
+    ],
+  },
   abstract: "Plant growth under drought and treatment.",
   summary: "Plant growth under drought and treatment.",
   url: "https://doi.org/10.1234/test",
@@ -138,8 +147,17 @@ test("mobile article comparison shows distinct evidence, peer-review provenance 
   const records = [
     {
       ...article,
-      abstract:
-        "We randomized 40 plants to drought treatment. Results showed growth increased by 12.5 cm.",
+      abstract: "Abstract-only detail must not appear in comparisons.",
+      fullText: {
+        status: "available",
+        sections: [
+          {
+            heading: "Methods",
+            text: "We randomized 40 plants to drought treatment.",
+          },
+          { heading: "Results", text: "Growth increased by 12.5 cm." },
+        ],
+      },
       peerReview: {
         status: "journal-policy",
         label: "Peer reviewed (journal policy)",
@@ -151,18 +169,40 @@ test("mobile article comparison shows distinct evidence, peer-review provenance 
       ...article,
       doi: "10.1234/b",
       title: "Microscopy plant study",
-      abstract:
-        "We used microscopy on 25 plants. Results showed growth decreased by 3 cm.",
+      abstract: "Abstract-only detail must not appear in comparisons.",
+      fullText: {
+        status: "available",
+        sections: [
+          { heading: "Methods", text: "We used microscopy on 25 plants." },
+          { heading: "Results", text: "Growth decreased by 3 cm." },
+        ],
+      },
     },
     {
       ...article,
       doi: "10.1234/c",
-      title: "Study without an abstract",
+      title: "Study without full text",
+      fullText: {
+        status: "unavailable",
+        reason: "Full text unavailable.",
+        sections: [],
+      },
       abstract: "",
     },
   ];
   await page.route("**/api/articles", (route) =>
-    route.fulfill({ json: { articles: records } }),
+    route.fulfill({
+      json: { articles: records.map((a) => ({ ...a, fullText: undefined })) },
+    }),
+  );
+  await page.route("**/api/full-text", (route) =>
+    route.fulfill({
+      json: {
+        fullText: records.find(
+          (a) => a.doi === route.request().postDataJSON().doi,
+        ).fullText,
+      },
+    }),
   );
   await page.goto("/");
   await page
@@ -184,13 +224,107 @@ test("mobile article comparison shows distinct evidence, peer-review provenance 
   await expect(dialog.getByRole("table")).toContainText(
     "microscopy on 25 plants",
   );
+  await expect(dialog).not.toContainText(
+    "Abstract-only detail must not appear in comparisons.",
+  );
   await expect(dialog.getByRole("table")).toContainText("12.5 cm");
   await expect(dialog.getByRole("table")).toContainText("3 cm");
   await page.getByLabel("Article B", { exact: true }).selectOption("10.1234/c");
-  await expect(dialog).toContainText("no abstract available");
+  await expect(dialog).toContainText("full text unavailable");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test("comparison excludes the removed full-text questions section", async ({
+  page,
+}) => {
+  await page.route("**/api/articles", (route) =>
+    route.fulfill({
+      json: {
+        articles: [
+          article,
+          { ...article, doi: "10.1234/b", title: "Second article" },
+        ],
+      },
+    }),
+  );
+  await page.goto("/");
+  await page
+    .getByLabel("Title, topic, materials, and methods")
+    .fill("Plant growth");
+  await page
+    .getByLabel("Organized findings", { exact: true })
+    .fill("Growth: 4 cm");
+  await page.getByRole("button", { name: /Find research connections/ }).click();
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page
+    .getByRole("button", { name: "Compare articles", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toContainText(
+    "Questions to check in the full text",
+  );
+});
+
+test("unavailable full text is not replaced with an abstract and can be retried", async ({
+  page,
+}) => {
+  const records = [
+    {
+      ...article,
+      fullText: undefined,
+      title: "Article A",
+      abstract: "ABSTRACT ONLY CLAIM",
+    },
+    { ...article, fullText: undefined, doi: "10.1234/b", title: "Article B" },
+  ];
+  let attempts = 0;
+  await page.route("**/api/articles", (route) =>
+    route.fulfill({ json: { articles: records } }),
+  );
+  await page.route("**/api/full-text", (route) => {
+    const doi = route.request().postDataJSON().doi;
+    const failed = doi === article.doi && ++attempts === 1;
+    return route.fulfill({
+      json: {
+        fullText: failed
+          ? {
+              status: "unavailable",
+              reason: "Full text unavailable. Please retry.",
+              sections: [],
+            }
+          : {
+              status: "available",
+              sections: [
+                {
+                  heading: "Methods",
+                  text: "We measured 75 plants in the complete article body.",
+                },
+                { heading: "Results", text: "Growth increased by 8 cm." },
+              ],
+            },
+      },
+    });
+  });
+  await page.goto("/");
+  await page.getByLabel("Title, topic, materials, and methods").fill("Growth");
+  await page
+    .getByLabel("Organized findings", { exact: true })
+    .fill("Growth 4 cm");
+  await page.getByRole("button", { name: /Find research connections/ }).click();
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page
+    .getByRole("button", { name: "Compare articles", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Retry full text for Article A", exact: true })
+    .click();
+  await expect(page.getByRole("dialog").getByRole("table")).toContainText(
+    "75 plants",
+  );
+  await expect(page.getByRole("dialog")).not.toContainText(
+    "ABSTRACT ONLY CLAIM",
+  );
 });

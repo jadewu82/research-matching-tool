@@ -664,3 +664,11 @@ footer {
     flex-direction: column;
   }
 }
+.section-summary {
+  font-size: 13px;
+  color: #425e4d;
+  line-height: 1.8;
+}
+.section-summary p {
+  margin: 0 0 8px;
+}

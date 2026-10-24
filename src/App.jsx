@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   RadioGroup,
   Radio,
@@ -89,11 +89,11 @@ function ComparisonCard({ title, result }) {
           <EvidenceList items={result.article.measurements} />
           <a
             className="evidence-link"
-            href={result.article.url}
+            href={result.article.fullTextSourceUrl || result.article.url}
             target="_blank"
             rel="noopener noreferrer"
           >
-            Read original source <ExternalLink size={12} />
+            Read full-text source <ExternalLink size={12} />
           </a>
         </>
       )}
@@ -148,15 +148,13 @@ function PeerReviewLabel({ article }) {
 }
 function EvidenceList({ items }) {
   return items?.length ? (
-    <ul className="evidence-excerpts">
+    <div className="section-summary">
       {items.map((item, i) => (
-        <li key={i}>{item}</li>
+        <p key={i}>{item}</p>
       ))}
-    </ul>
+    </div>
   ) : (
-    <p className="hint">
-      Not identified in the available abstract. Check the full text.
-    </p>
+    <p className="hint">No summary available from the retrieved full text.</p>
   );
 }
 function ArticleComparison({ first, second }) {
@@ -172,17 +170,21 @@ function ArticleComparison({ first, second }) {
   ];
   return (
     <section aria-label="Side-by-side article evidence">
-      {result.coverage.length > 0 && (
-        <div className="evidence-warning" role="status">
-          {result.coverage.map((note) => (
-            <p key={note}>{note}</p>
-          ))}
-        </div>
-      )}
+      {result.coverage.length > 0 &&
+        ![first, second].some(
+          (a) => !a.fullText || a.fullText.status === "loading",
+        ) && (
+          <div className="evidence-warning" role="status">
+            {result.coverage.map((note) => (
+              <p key={note}>{note}</p>
+            ))}
+          </div>
+        )}
       <p className="hint">
-        Excerpts below are copied from available abstracts and selected using
-        text patterns. Missing excerpts do not mean the article lacks those
-        details.
+        Section summaries use the retrieved full article body, including
+        available tables and figure captions. Abstracts are excluded. Summaries
+        are extractive; a missing summary means the section could not be
+        identified.
       </p>
       <div
         className="comparison-table-wrapper"
@@ -190,7 +192,7 @@ function ArticleComparison({ first, second }) {
         aria-label="Scrollable article comparison"
       >
         <table className="comparison-table">
-          <caption>Published evidence, side by side</caption>
+          <caption>Full-text section summaries, side by side</caption>
           <thead>
             <tr>
               <th scope="col">Compare</th>
@@ -202,11 +204,11 @@ function ArticleComparison({ first, second }) {
                   </p>
                   <a
                     className="evidence-link"
-                    href={a.url}
+                    href={a.fullTextSourceUrl || a.url}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Read original source <ExternalLink size={12} />
+                    Read full-text source <ExternalLink size={12} />
                   </a>
                 </th>
               ))}
@@ -224,67 +226,22 @@ function ArticleComparison({ first, second }) {
                 <th scope="row">{label}</th>
                 <td>
                   <EvidenceList items={result.left[key]} />
+                  <p className="hint">
+                    {result.left.sourceSections[key]?.join(" · ")}
+                  </p>
                 </td>
                 <td>
                   <EvidenceList items={result.right[key]} />
+                  <p className="hint">
+                    {result.right.sourceSections[key]?.join(" · ")}
+                  </p>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <div className="comparison-card">
-        <h3>Topic overlap</h3>
-        <div className="badges">
-          {result.sharedTerms.length ? (
-            result.sharedTerms.map((term) => (
-              <Badge variant="secondary" key={term}>
-                {term}
-              </Badge>
-            ))
-          ) : (
-            <p className="hint">No shared terms detected.</p>
-          )}
-        </div>
-        <p className="hint">
-          Shared words indicate topical overlap, not agreement between the
-          findings.
-        </p>
-        <div className="two-col">
-          <div>
-            <p className="field-label">Terms specific to Article A</p>
-            <p className="hint">
-              {result.differentTerms.left.join(", ") ||
-                "No distinct terms detected."}
-            </p>
-          </div>
-          <div>
-            <p className="field-label">Terms specific to Article B</p>
-            <p className="hint">
-              {result.differentTerms.right.join(", ") ||
-                "No distinct terms detected."}
-            </p>
-          </div>
-        </div>
-      </div>
-      <div className="comparison-card">
-        <h3>Questions to check in the full text</h3>
-        <ul className="evidence-excerpts">
-          <li>
-            Do the methods, materials, controls and study populations address
-            the same question?
-          </li>
-          <li>
-            Are outcomes measured with comparable definitions, units and time
-            points?
-          </li>
-          <li>
-            Do sample sizes, statistical tests and uncertainty support comparing
-            the reported findings?
-          </li>
-        </ul>
-        <p className="hint">{result.limitation}</p>
-      </div>
+      <p className="hint">{result.limitation}</p>
     </section>
   );
 }
@@ -305,6 +262,8 @@ export default function App() {
     [experiment, setExperiment] = useState(null),
     [comparison, setComparison] = useState(null);
   const [pair, setPair] = useState([null, null]);
+  const fullTextCache = useRef(new Map());
+  const [retryVersion, setRetryVersion] = useState(0);
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const input = (key, props = {}) => (
     <input
@@ -411,6 +370,72 @@ export default function App() {
   const second =
     chosen.find((a) => a.doi === pair[1] && a.doi !== first?.doi) ||
     chosen.find((a) => a.doi !== first?.doi);
+  const activeArticles =
+    comparison === "articles"
+      ? [first, second].filter(Boolean)
+      : comparison === "experiment"
+        ? chosen
+        : [];
+  const activeKey = activeArticles.map((a) => a.doi).join("|");
+  useEffect(() => {
+    let cancelled = false,
+      cursor = 0;
+    const pending = activeArticles.filter(
+      (a) => !a.fullText || a.fullText.status === "loading",
+    );
+    async function worker() {
+      while (!cancelled && cursor < pending.length) {
+        const article = pending[cursor++];
+        setArticles((current) =>
+          current.map((a) =>
+            a.doi === article.doi
+              ? { ...a, fullText: { status: "loading", sections: [] } }
+              : a,
+          ),
+        );
+        if (!fullTextCache.current.has(article.doi))
+          fullTextCache.current.set(
+            article.doi,
+            (async () => {
+              try {
+                const response = await fetch("/api/full-text", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ doi: article.doi }),
+                });
+                const result = await response.json();
+                if (!response.ok || !result.fullText)
+                  throw new Error("Full text unavailable");
+                return result.fullText;
+              } catch {
+                return {
+                  status: "unavailable",
+                  reason:
+                    "Full text could not be retrieved. Please retry. Abstracts are not used for comparisons.",
+                  sections: [],
+                };
+              }
+            })(),
+          );
+        const fullText = await fullTextCache.current.get(article.doi);
+        setArticles((current) =>
+          current.map((a) => (a.doi === article.doi ? { ...a, fullText } : a)),
+        );
+      }
+    }
+    Promise.all(Array.from({ length: Math.min(3, pending.length) }, worker));
+    return () => {
+      cancelled = true;
+    };
+    // Only selection changes or an explicit retry should schedule requests.
+  }, [comparison, activeKey, retryVersion]);
+  function retryFullText(doi) {
+    fullTextCache.current.delete(doi);
+    setArticles((current) =>
+      current.map((a) => (a.doi === doi ? { ...a, fullText: undefined } : a)),
+    );
+    setRetryVersion((value) => value + 1);
+  }
   function openComparison(kind) {
     setPair([chosen[0]?.doi, chosen[1]?.doi]);
     setComparison(kind);
@@ -735,8 +760,9 @@ export default function App() {
                   </div>
                   <p className="hint mt-4">
                     Only research context and keywords are sent to Crossref for
-                    discovery. Summaries use available abstracts; comparisons
-                    guide reading, not scientific conclusions.
+                    discovery. Article cards show abstracts; comparisons use
+                    retrieved full text to guide reading, not scientific
+                    conclusions.
                   </p>
                   {busy && (
                     <div role="status" className="hint">
@@ -969,6 +995,30 @@ export default function App() {
                 <TabsTrigger value="evidence">Evidence & limits</TabsTrigger>
               </TabsList>
               <TabsContent value="connections">
+                {activeArticles.some(
+                  (a) => !a.fullText || a.fullText.status === "loading",
+                ) && (
+                  <p className="hint" role="status">
+                    <LoaderCircle className="spinner inline mr-2" size={15} />
+                    Retrieving full text for selected articles…
+                  </p>
+                )}
+                {activeArticles
+                  .filter((a) => a.fullText?.status === "unavailable")
+                  .map((a) => (
+                    <div className="evidence-warning" key={a.doi}>
+                      <p>
+                        {a.title}: {a.fullText.reason}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => retryFullText(a.doi)}
+                      >
+                        Retry full text for {a.title}
+                      </Button>
+                    </div>
+                  ))}
                 {comparison === "experiment" && experiment && (
                   <>
                     <p className="field-label mt-5">Your organized findings</p>
@@ -1027,16 +1077,17 @@ export default function App() {
                 <div className="comparison-card">
                   <h3>What this comparison can tell you</h3>
                   <p className="summary-text">
-                    Comparisons show source-attributed excerpts and shared terms
-                    from available abstracts. They help you find passages worth
-                    investigating; they do not establish scientific agreement,
-                    causality, or comparable effect sizes.
+                    Comparisons summarize sections from accessible full article
+                    bodies. Abstracts are excluded. They help you find passages
+                    worth investigating; they do not establish scientific
+                    agreement, causality, or comparable effect sizes.
                   </p>
                   <p className="hint">
-                    Read the full methods, populations, controls, units, and
-                    uncertainty before interpreting differences. Abstract
-                    extracts may omit important limitations. Statistical
-                    software is recorded as context and is not executed.
+                    Coverage is currently limited to open-access full text
+                    available through Europe PMC. Section summaries are
+                    extractive and may omit details. Check the linked full text
+                    before interpreting differences. Statistical software is
+                    recorded as context and is not executed.
                   </p>
                 </div>
               </TabsContent>

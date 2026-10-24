@@ -45,7 +45,16 @@ test("normalizes metadata and never fabricates an unavailable abstract", () => {
 });
 test("comparison identifies textual overlap while stating evidence limits", () => {
   const result = compare(
-    { title: "Plant growth", abstract: "Treatment improves plant growth." },
+    {
+      title: "Plant growth",
+      abstract: "Abstract claims are excluded.",
+      fullText: {
+        status: "available",
+        sections: [
+          { heading: "Results", text: "Treatment improves plant growth." },
+        ],
+      },
+    },
     "Plant treatment growth",
     "Plant growth: 4 cm",
     "R",

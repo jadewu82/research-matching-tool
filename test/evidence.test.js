@@ -103,6 +103,27 @@ test("article comparison preserves attributable methods, findings, measurements 
       "We used microscopy on 25 plants. Results showed growth decreased by 3 cm.",
     url: "https://doi.org/10.1234/b",
   };
+  a.fullText = {
+    status: "available",
+    sections: [
+      {
+        heading: "Methods",
+        text: "We randomized 40 plants to drought treatment.",
+      },
+      { heading: "Results", text: "Growth increased by 12.5 cm." },
+      {
+        heading: "Limitations",
+        text: "The small sample size is a limitation.",
+      },
+    ],
+  };
+  b.fullText = {
+    status: "available",
+    sections: [
+      { heading: "Methods", text: "We used microscopy on 25 plants." },
+      { heading: "Results", text: "Growth decreased by 3 cm." },
+    ],
+  };
   const result = compareArticles(a, b);
   assert.ok(result.sharedTerms.includes("growth"));
   assert.match(result.left.methods.join(" "), /randomized 40/);
@@ -114,5 +135,5 @@ test("article comparison preserves attributable methods, findings, measurements 
   assert.equal(result.left.url, a.url);
   const missing = compareArticles(a, { title: "Unavailable", abstract: "" });
   assert.equal(missing.right.findings.length, 0);
-  assert.match(missing.coverage.join(" "), /Unavailable.*abstract/i);
+  assert.match(missing.coverage.join(" "), /Unavailable.*full text/i);
 });
