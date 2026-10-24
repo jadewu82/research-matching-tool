@@ -22,7 +22,7 @@ test("HTTP workflow serves UI, searches with filters, resolves DOIs and rejects 
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   const html = await (await fetch(base)).text();
-  assert.match(html, /Research Matching Tool/);
+  assert.match(html, /CandleLit/);
   const nonce = html.match(/name="csp-nonce" content="([^"]+)"/)[1];
   assert.ok(nonce && nonce !== "{{CSP_NONCE}}");
   assert.ok(

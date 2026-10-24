@@ -579,3 +579,78 @@ test("DOI analysis without a dataset opens a single article summary on mobile", 
     page.getByRole("button", { name: "Compare with my findings", exact: true }),
   ).toBeDisabled();
 });
+
+test("one article compares directly with findings without changing the reading collection", async ({
+  page,
+}) => {
+  const first = {
+      ...article,
+      title: "Article A",
+      fullText: {
+        status: "available",
+        sections: [
+          { heading: "Methods", text: "We randomized 40 plants." },
+          { heading: "Results", text: "Plant growth increased by 8 cm." },
+          {
+            heading: "Limitations",
+            text: "The small sample limits generalization.",
+          },
+        ],
+      },
+    },
+    second = {
+      ...article,
+      doi: "10.1234/b",
+      title: "Article B",
+      fullText: {
+        status: "available",
+        sections: [
+          { heading: "Methods", text: "Microscopy was used on 25 samples." },
+        ],
+      },
+    };
+  await page.route("**/api/articles", (route) =>
+    route.fulfill({ json: { articles: [first, second] } }),
+  );
+  await page.goto("/");
+  await page
+    .getByLabel("Title, topic, materials, and methods")
+    .fill("Plant growth");
+  await page
+    .getByLabel("Organized findings", { exact: true })
+    .fill("User growth measurements: 4 cm");
+  await page.getByRole("button", { name: /Find research connections/ }).click();
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page
+    .getByRole("button", {
+      name: "Compare Article A with my findings",
+      exact: true,
+    })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("User growth measurements: 4 cm");
+  await expect(dialog).toContainText("We randomized 40 plants.");
+  await expect(dialog).not.toContainText("Microscopy was used on 25 samples.");
+  await expect(dialog).not.toContainText("Article B");
+  await page.getByRole("button", { name: "Close comparison" }).click();
+  await expect(
+    page.getByText("2 articles found · 2 selected", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "View section summaries for Article A",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", {
+      name: "Compare Article A with my findings",
+      exact: true,
+    })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "User growth measurements: 4 cm",
+  );
+  await expect(page.getByRole("dialog")).not.toContainText("Article B");
+});

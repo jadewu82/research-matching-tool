@@ -66,7 +66,7 @@ export function createServer(fetcher = fetch) {
             `https://api.crossref.org/works${path}`,
             {
               headers: {
-                "User-Agent": "ResearchMatchingTool/0.1 (research discovery)",
+                "User-Agent": "CandleLit/0.1 (research discovery)",
               },
               signal: AbortSignal.timeout(20000),
             },
@@ -183,6 +183,6 @@ export function createServer(fetcher = fetch) {
 if (process.argv[1] === fileURLToPath(import.meta.url))
   createServer().listen(Number(process.env.PORT || 3000), "0.0.0.0", () =>
     console.log(
-      "Research Matching Tool listening on port " + (process.env.PORT || 3000),
+      "CandleLit listening on port " + (process.env.PORT || 3000),
     ),
   );

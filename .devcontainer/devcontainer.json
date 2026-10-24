@@ -1,11 +1,11 @@
 {
-  "name": "Research Matching Tool",
+  "name": "CandleLit",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:5.2.3-24-bookworm",
   "hostRequirements": { "cpus": 2 },
   "forwardPorts": [3000],
   "portsAttributes": {
     "3000": {
-      "label": "Research Matching Tool",
+      "label": "CandleLit",
       "onAutoForward": "openBrowser",
       "visibility": "private"
     }

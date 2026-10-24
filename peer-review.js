@@ -40,7 +40,7 @@ export async function enrichPeerReview(works, fetcher = fetch) {
           `https://doaj.org/api/search/journals/${encodeURIComponent(query)}?pageSize=5`,
           {
             signal: deadline,
-            headers: { "User-Agent": "ResearchMatchingTool/0.1" },
+            headers: { "User-Agent": "CandleLit/0.1" },
           },
         );
         if (!response.ok) throw new Error("Journal registry unavailable");

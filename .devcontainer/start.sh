@@ -5,7 +5,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 port="${PORT:-3000}"
 
 # Lifecycle commands run again when a stopped Codespace resumes.
-if curl --fail --silent --max-time 2 "http://127.0.0.1:${port}/" | grep -q 'Research Matching Tool'; then
+if curl --fail --silent --max-time 2 "http://127.0.0.1:${port}/" | grep -q 'CandleLit'; then
   exit 0
 fi
 
@@ -15,8 +15,8 @@ fi
 
 nohup npm start > /tmp/research-matching-tool.log 2>&1 < /dev/null &
 for attempt in {1..30}; do
-  if curl --fail --silent --max-time 2 "http://127.0.0.1:${port}/" | grep -q 'Research Matching Tool'; then
-    echo "Research Matching Tool is ready on forwarded port ${port}."
+  if curl --fail --silent --max-time 2 "http://127.0.0.1:${port}/" | grep -q 'CandleLit'; then
+    echo "CandleLit is ready on forwarded port ${port}."
     exit 0
   fi
   sleep 1

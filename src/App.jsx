@@ -12,13 +12,11 @@ import {
 } from "react-aria-components";
 import {
   BookOpen,
-  FlaskConical,
   Search,
   ArrowRight,
   ArrowLeft,
   Plus,
   X,
-  SlidersHorizontal,
   ShieldCheck,
   Sparkles,
   ExternalLink,
@@ -27,7 +25,6 @@ import {
   Upload,
   GitCompareArrows,
   Library,
-  FileText,
   ChevronRight,
 } from "lucide-react";
 import { Button } from "./components/ui/button";
@@ -70,11 +67,10 @@ function Field({ label, id, children, hint }) {
     </div>
   );
 }
-function Section({ icon: Icon, title, children }) {
+function Section({ title, children }) {
   return (
     <section className="section">
       <div className="section-head">
-        <Icon size={19} />
         <h2>{title}</h2>
       </div>
       {children}
@@ -87,7 +83,9 @@ function ComparisonCard({ title, result }) {
       <h3>{title}</h3>
       {result.article && (
         <>
-          <p className="field-label">Methods reported in the article</p>
+          <p className="field-label">Research focus of the article</p>
+          <EvidenceList items={result.article.focus} />
+          <p className="field-label mt-4">Methods reported in the article</p>
           <EvidenceList items={result.article.methods} />
           <p className="field-label mt-4">Findings reported in the article</p>
           <EvidenceList items={result.article.findings} />
@@ -95,6 +93,10 @@ function ComparisonCard({ title, result }) {
             Measurements reported in the article
           </p>
           <EvidenceList items={result.article.measurements} />
+          <p className="field-label mt-4">
+            Limitations reported in the article
+          </p>
+          <EvidenceList items={result.article.limitations} />
           <a
             className="evidence-link"
             href={result.article.fullTextSourceUrl || result.article.url}
@@ -267,12 +269,27 @@ function ArticleComparison({ first, second }) {
   );
 }
 
-function ArticleSectionSummary({ article }) {
+function ArticleSectionSummary({ article, canCompare, onCompare }) {
   if (!article) return null;
   const evidence = articleEvidence(article);
   return (
     <section aria-label="Single article section summaries">
       <h2 className="serif text-2xl mt-5">{article.title}</h2>
+      <Button
+        variant="outline"
+        className="mb-4"
+        disabled={!canCompare}
+        aria-label={`Compare ${article.title} with my findings`}
+        onClick={() => onCompare(article.doi)}
+      >
+        Compare this article with my findings
+      </Button>
+      {!canCompare && (
+        <p className="hint">
+          Add organized findings to your research brief to compare this article
+          with your own results.
+        </p>
+      )}
       {evidence.isReview && (
         <p className="hint">
           This is a review article. Its methods and findings describe the
@@ -331,6 +348,7 @@ export default function App() {
     [experiment, setExperiment] = useState(null),
     [comparison, setComparison] = useState(null);
   const [pair, setPair] = useState([null, null]);
+  const [comparisonDoi, setComparisonDoi] = useState(null);
   const [summaryDoi, setSummaryDoi] = useState(null),
     [resultNote, setResultNote] = useState("");
   const fullTextCache = useRef(new Map());
@@ -400,6 +418,7 @@ export default function App() {
       );
       setSort("relevance");
       setExperiment(request);
+      setComparisonDoi(null);
       setPage("results");
       if (mode === "analyze" && result.articles.length) {
         if (request.data.trim()) setComparison("experiment");
@@ -437,9 +456,12 @@ export default function App() {
       return next;
     });
   }
+  const experimentArticles = comparisonDoi
+    ? articles.filter((a) => a.doi === comparisonDoi)
+    : chosen;
   const panels = [];
   if (comparison === "experiment" && experiment)
-    for (const article of chosen)
+    for (const article of experimentArticles)
       panels.push({
         key: article.doi,
         title: article.title,
@@ -460,7 +482,7 @@ export default function App() {
       : comparison === "articles"
         ? [first, second].filter(Boolean)
         : comparison === "experiment"
-          ? chosen
+          ? experimentArticles
           : [];
   const activeKey = activeArticles.map((a) => a.doi).join("|");
   useEffect(() => {
@@ -581,7 +603,13 @@ export default function App() {
     setSummaryDoi(doi);
     setComparison("summary");
   }
+  function compareOneWithFindings(doi) {
+    if (!experiment?.data?.trim()) return;
+    setComparisonDoi(doi);
+    setComparison("experiment");
+  }
   function openComparison(kind) {
+    setComparisonDoi(null);
     setPair([chosen[0]?.doi, chosen[1]?.doi]);
     setComparison(kind);
   }
@@ -600,7 +628,7 @@ export default function App() {
             <span className="brand-icon">
               <Library size={22} />
             </span>
-            Research Matching Tool
+            CandleLit
           </a>
           <span className="topnote">A LITTLE CONTEXT. A NEW CONNECTION.</span>
         </div>
@@ -659,10 +687,7 @@ export default function App() {
                 </p>
               </aside>
               <form className="surface" onSubmit={submit} aria-busy={busy}>
-                <Section
-                  icon={FlaskConical}
-                  title="01 · Tell us about your research"
-                >
+                <Section title="01 · Tell us about your research">
                   <Field
                     label="Title, topic, materials, and methods"
                     id="context"
@@ -679,7 +704,7 @@ export default function App() {
                     />
                   </Field>
                 </Section>
-                <Section icon={Search} title="02 · What would you like to do?">
+                <Section title="02 · What would you like to do?">
                   <RadioGroup
                     aria-label="Research purpose"
                     value={mode}
@@ -764,10 +789,7 @@ export default function App() {
                     </div>
                   )}
                 </Section>
-                <Section
-                  icon={FileText}
-                  title="03 · Share your organized findings (optional)"
-                >
+                <Section title="03 · Share your organized findings (optional)">
                   <Field
                     label="Organized findings"
                     id="data"
@@ -801,10 +823,7 @@ export default function App() {
                     </div>
                   </div>
                 </Section>
-                <Section
-                  icon={SlidersHorizontal}
-                  title="04 · A little more context"
-                >
+                <Section title="04 · A little more context">
                   <Field
                     label="Statistical software and analysis methods (optional)"
                     id="statistics"
@@ -1088,6 +1107,16 @@ export default function App() {
                       >
                         View section summaries
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 ml-2"
+                        disabled={!experiment?.data?.trim()}
+                        aria-label={`Compare ${article.title} with my findings`}
+                        onClick={() => compareOneWithFindings(article.doi)}
+                      >
+                        Compare with my findings
+                      </Button>
                       <div className="flex justify-between items-center mt-4 gap-3">
                         <PeerReviewLabel article={article} />
                         <Button variant="ghost" size="sm" asChild>
@@ -1293,7 +1322,11 @@ export default function App() {
                         ))}
                       </select>
                     </Field>
-                    <ArticleSectionSummary article={activeArticles[0]} />
+                    <ArticleSectionSummary
+                      article={activeArticles[0]}
+                      canCompare={!!experiment?.data?.trim()}
+                      onCompare={compareOneWithFindings}
+                    />
                   </>
                 ) : comparison === "articles" ? (
                   <>
@@ -1369,8 +1402,8 @@ export default function App() {
         </Modal>
       </ModalOverlay>
       <footer>
-        Research Matching Tool · Find sources. Explore context. Keep your
-        scientific judgment.
+        CandleLit · Find sources. Explore context. Keep your scientific
+        judgment.
       </footer>
     </>
   );
