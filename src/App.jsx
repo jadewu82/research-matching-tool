@@ -40,7 +40,13 @@ import {
 } from "./components/ui/accordion";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import { parseFullText, parseProvidedText } from "../full-text-parser.js";
-import { compare, compareArticles, validateRequest } from "../research.js";
+import {
+  articleEvidence,
+  LANGUAGES,
+  compare,
+  compareArticles,
+  validateRequest,
+} from "../research.js";
 
 const initial = {
   context: "",
@@ -51,6 +57,7 @@ const initial = {
   keywords: "",
   from: "",
   to: "",
+  language: "",
 };
 function Field({ label, id, children, hint }) {
   return (
@@ -260,6 +267,54 @@ function ArticleComparison({ first, second }) {
   );
 }
 
+function ArticleSectionSummary({ article }) {
+  if (!article) return null;
+  const evidence = articleEvidence(article);
+  return (
+    <section aria-label="Single article section summaries">
+      <h2 className="serif text-2xl mt-5">{article.title}</h2>
+      {evidence.isReview && (
+        <p className="hint">
+          This is a review article. Its methods and findings describe the
+          literature reviewed, rather than one original experiment.
+        </p>
+      )}
+      {evidence.hasFullText && (
+        <a
+          className="evidence-link"
+          href={evidence.fullTextSourceUrl || article.url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {evidence.supplied ? "Publisher source" : "Read full-text source"}{" "}
+          <ExternalLink size={12} />
+        </a>
+      )}
+      {[
+        ["Research focus", "focus"],
+        ["Study methods", "methods"],
+        ["Reported findings", "findings"],
+        ["Reported measurements", "measurements"],
+        ["Limitations", "limitations"],
+      ].map(([label, key]) => (
+        <article className="comparison-card" key={key}>
+          <h3>{label}</h3>
+          <EvidenceList items={evidence[key]} />
+          {evidence.sourceSections[key]?.length > 0 && (
+            <p className="hint">
+              Source sections: {evidence.sourceSections[key].join(" · ")}
+            </p>
+          )}
+        </article>
+      ))}
+      <p className="hint">
+        Section summaries are extractive and use full text only. Abstracts are
+        not substituted.
+      </p>
+    </section>
+  );
+}
+
 export default function App() {
   const [form, setForm] = useState(initial),
     [mode, setMode] = useState("find"),
@@ -276,6 +331,8 @@ export default function App() {
     [experiment, setExperiment] = useState(null),
     [comparison, setComparison] = useState(null);
   const [pair, setPair] = useState([null, null]);
+  const [summaryDoi, setSummaryDoi] = useState(null),
+    [resultNote, setResultNote] = useState("");
   const fullTextCache = useRef(new Map());
   const [retryVersion, setRetryVersion] = useState(0);
   const [fullTextErrors, setFullTextErrors] = useState({});
@@ -307,7 +364,13 @@ export default function App() {
       dois: dois.map((row) => row.value.trim()).filter(Boolean),
     };
     if (mode === "analyze")
-      Object.assign(request, { type: "", keywords: "", from: "", to: "" });
+      Object.assign(request, {
+        type: "",
+        keywords: "",
+        from: "",
+        to: "",
+        language: "",
+      });
     try {
       validateRequest(request);
     } catch (err) {
@@ -331,14 +394,20 @@ export default function App() {
       if (!response.ok)
         throw new Error(result.error || "Unable to retrieve articles.");
       setArticles(result.articles);
+      setResultNote(result.note || "");
       setSelected(
         new Set(mode === "analyze" ? result.articles.map((a) => a.doi) : []),
       );
       setSort("relevance");
       setExperiment(request);
       setPage("results");
-      if (mode === "analyze" && result.articles.length)
-        setComparison("experiment");
+      if (mode === "analyze" && result.articles.length) {
+        if (request.data.trim()) setComparison("experiment");
+        else {
+          setSummaryDoi(result.articles[0].doi);
+          setComparison("summary");
+        }
+      }
       setTimeout(() => resultHeading.current?.focus(), 0);
     } catch (err) {
       setError(err.message || "Unable to retrieve articles. Please try again.");
@@ -386,11 +455,13 @@ export default function App() {
     chosen.find((a) => a.doi === pair[1] && a.doi !== first?.doi) ||
     chosen.find((a) => a.doi !== first?.doi);
   const activeArticles =
-    comparison === "articles"
-      ? [first, second].filter(Boolean)
-      : comparison === "experiment"
-        ? chosen
-        : [];
+    comparison === "summary"
+      ? articles.filter((a) => a.doi === summaryDoi)
+      : comparison === "articles"
+        ? [first, second].filter(Boolean)
+        : comparison === "experiment"
+          ? chosen
+          : [];
   const activeKey = activeArticles.map((a) => a.doi).join("|");
   useEffect(() => {
     let cancelled = false,
@@ -505,6 +576,10 @@ export default function App() {
         [article.doi]: error.message,
       }));
     }
+  }
+  function openSummary(doi) {
+    setSummaryDoi(doi);
+    setComparison("summary");
   }
   function openComparison(kind) {
     setPair([chosen[0]?.doi, chosen[1]?.doi]);
@@ -691,7 +766,7 @@ export default function App() {
                 </Section>
                 <Section
                   icon={FileText}
-                  title="03 · Share your organized findings"
+                  title="03 · Share your organized findings (optional)"
                 >
                   <Field
                     label="Organized findings"
@@ -701,7 +776,6 @@ export default function App() {
                     <textarea
                       className="textarea"
                       id="data"
-                      required
                       maxLength={20000}
                       value={form.data}
                       onChange={(e) => set("data", e.target.value)}
@@ -766,7 +840,10 @@ export default function App() {
                                 >
                                   <option value="">All resources</option>
                                   <option value="journal-article">
-                                    Journal articles (includes reviews)
+                                    Journal articles
+                                  </option>
+                                  <option value="review-article">
+                                    Review articles
                                   </option>
                                   <option value="dissertation">
                                     Dissertations
@@ -783,18 +860,51 @@ export default function App() {
                                   placeholder: "e.g. drought, chlorophyll",
                                 })}
                               </Field>
-                              <Field label="Published from" id="from">
-                                {input("from", { type: "date" })}
+                              <Field label="From year" id="from">
+                                {input("from", {
+                                  type: "number",
+                                  min: 1000,
+                                  max: 2999,
+                                  step: 1,
+                                  placeholder: "e.g. 2020",
+                                })}
                               </Field>
-                              <Field label="Published through" id="to">
-                                {input("to", { type: "date" })}
+                              <Field label="Through year" id="to">
+                                {input("to", {
+                                  type: "number",
+                                  min: 1000,
+                                  max: 2999,
+                                  step: 1,
+                                  placeholder: "e.g. 2026",
+                                })}
+                              </Field>
+                              <Field label="Article language" id="language">
+                                <select
+                                  id="language"
+                                  className="input"
+                                  value={form.language}
+                                  onChange={(e) =>
+                                    set("language", e.target.value)
+                                  }
+                                >
+                                  <option value="">All languages</option>
+                                  {Object.entries(LANGUAGES).map(
+                                    ([code, label]) => (
+                                      <option key={code} value={code}>
+                                        {label}
+                                      </option>
+                                    ),
+                                  )}
+                                </select>
                               </Field>
                             </div>
                             <p className="hint">
-                              Review articles cannot be reliably separated by
-                              Crossref. DOAJ journal-policy evidence is shown
-                              where available; missing verification does not
-                              mean an article was not peer reviewed.
+                              Review and language filters use available
+                              publication metadata. Records with unknown
+                              language are excluded when a language is selected.
+                              Some reviews may lack classification metadata.
+                              DOAJ review-policy labels describe journal policy,
+                              not article-level verification.
                             </p>
                           </AccordionContent>
                         </AccordionItem>
@@ -836,7 +946,7 @@ export default function App() {
                   </p>
                   {busy && (
                     <div role="status" className="hint">
-                      Retrieving publisher metadata. This may take up to 30
+                      Retrieving publisher metadata. This may take up to 40
                       seconds.
                     </div>
                   )}
@@ -889,6 +999,11 @@ export default function App() {
                 </select>
               </label>
             </div>
+            {resultNote && (
+              <p className="hint" role="status">
+                {resultNote}
+              </p>
+            )}
             <div className="result-grid">
               <div>
                 {!articles.length ? (
@@ -914,7 +1029,9 @@ export default function App() {
                     >
                       <div className="article-top">
                         <Badge variant="secondary">
-                          {article.type?.replaceAll("-", " ") || "Research"}
+                          {article.resourceLabel ||
+                            article.type?.replaceAll("-", " ") ||
+                            "Research"}
                         </Badge>
                         <Checkbox
                           aria-label={`Select ${article.title}`}
@@ -934,7 +1051,8 @@ export default function App() {
                       </div>
                       <h2>{article.title}</h2>
                       <p className="metadata">
-                        {article.authors} · {article.year || "Date unavailable"}
+                        {article.authors} · {article.year || "Date unavailable"}{" "}
+                        · {article.languageLabel || "Language not supplied"}
                       </p>
                       <div className="badges">
                         {article.keywords?.map((keyword) => (
@@ -961,6 +1079,15 @@ export default function App() {
                           </AccordionContent>
                         </AccordionItem>
                       </Accordion>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        aria-label={`View section summaries for ${article.title}`}
+                        onClick={() => openSummary(article.doi)}
+                      >
+                        View section summaries
+                      </Button>
                       <div className="flex justify-between items-center mt-4 gap-3">
                         <PeerReviewLabel article={article} />
                         <Button variant="ghost" size="sm" asChild>
@@ -1004,11 +1131,25 @@ export default function App() {
                 </div>
                 <hr className="border-border my-5" />
                 <Button
-                  disabled={!chosen.length}
+                  disabled={!chosen.length || !experiment?.data?.trim()}
                   onClick={() => openComparison("experiment")}
                 >
                   Compare with my findings
                 </Button>
+                <Button
+                  variant="outline"
+                  disabled={chosen.length !== 1}
+                  onClick={() => openSummary(chosen[0].doi)}
+                >
+                  View selected article summary
+                </Button>
+                {!experiment?.data?.trim() && (
+                  <p className="hint">
+                    Add organized findings to compare literature with your own
+                    data. Article summaries and article-to-article comparisons
+                    do not require a dataset.
+                  </p>
+                )}
                 <Button
                   variant="outline"
                   disabled={chosen.length < 2}
@@ -1037,23 +1178,31 @@ export default function App() {
           <Dialog
             className="dialog"
             aria-label={
-              comparison === "articles"
-                ? "Article-to-article comparison"
-                : "Literature and your findings"
+              comparison === "summary"
+                ? "Article section summaries"
+                : comparison === "articles"
+                  ? "Article-to-article comparison"
+                  : "Literature and your findings"
             }
           >
             <div className="dialog-header">
               <div>
                 <p className="eyebrow">EXPLORE THE CONNECTIONS</p>
                 <Heading slot="title">
-                  {comparison === "articles"
-                    ? "Articles in conversation"
-                    : "Literature and your findings"}
+                  {comparison === "summary"
+                    ? "Article section summaries"
+                    : comparison === "articles"
+                      ? "Articles in conversation"
+                      : "Literature and your findings"}
                 </Heading>
               </div>
               <AriaButton
                 className="rounded-md p-2 hover:bg-secondary"
-                aria-label="Close comparison"
+                aria-label={
+                  comparison === "summary"
+                    ? "Close summary"
+                    : "Close comparison"
+                }
                 onPress={() => setComparison(null)}
               >
                 <X size={21} />
@@ -1061,7 +1210,11 @@ export default function App() {
             </div>
             <Tabs defaultValue="connections">
               <TabsList>
-                <TabsTrigger value="connections">Connections</TabsTrigger>
+                <TabsTrigger value="connections">
+                  {comparison === "summary"
+                    ? "Section summaries"
+                    : "Connections"}
+                </TabsTrigger>
                 <TabsTrigger value="evidence">Evidence & limits</TabsTrigger>
               </TabsList>
               <TabsContent value="connections">
@@ -1076,6 +1229,9 @@ export default function App() {
                 {activeArticles.map((a) => (
                   <div className="comparison-card" key={a.doi}>
                     <h3>{a.title}</h3>
+                    {a.fullText?.status === "unavailable" && (
+                      <p className="font-medium">Full text unavailable</p>
+                    )}
                     <p className="hint">
                       {a.fullText?.status === "available"
                         ? `Full text ready · ${a.fullText.provider || "Full article body"}${a.fullText.fileName ? " · " + a.fullText.fileName : ""}`
@@ -1121,7 +1277,25 @@ export default function App() {
                     <pre className="findings">{experiment.data}</pre>
                   </>
                 )}
-                {comparison === "articles" ? (
+                {comparison === "summary" ? (
+                  <>
+                    <Field label="Article to summarize" id="summary-article">
+                      <select
+                        className="input"
+                        id="summary-article"
+                        value={summaryDoi || ""}
+                        onChange={(e) => setSummaryDoi(e.target.value)}
+                      >
+                        {articles.map((a) => (
+                          <option key={a.doi} value={a.doi}>
+                            {a.title}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <ArticleSectionSummary article={activeArticles[0]} />
+                  </>
+                ) : comparison === "articles" ? (
                   <>
                     <div className="two-col mt-5">
                       {[

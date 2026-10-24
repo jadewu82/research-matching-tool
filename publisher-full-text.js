@@ -112,3 +112,28 @@ export function parseMaximumAcademicPress(html, doi) {
     throw new Error("Publisher full article body is empty.");
   return sections;
 }
+
+export function maximumAcademicPressMetadata(html, doi) {
+  const sections = parseMaximumAcademicPress(html, doi),
+    document = parse(html);
+  let language = "";
+  function scan(node) {
+    if (node.tagName === "meta") {
+      const name = node.attrs
+        ?.find((a) => a.name === "name")
+        ?.value?.toLowerCase();
+      if (name === "citation_language")
+        language = node.attrs?.find((a) => a.name === "content")?.value || "";
+    }
+    for (const child of node.childNodes || []) scan(child);
+  }
+  scan(document);
+  return {
+    language,
+    isReview: sections.some(
+      (s) =>
+        /intro|article body/i.test(s.heading) &&
+        /\bthis review\b/i.test(s.text),
+    ),
+  };
+}

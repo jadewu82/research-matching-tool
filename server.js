@@ -4,6 +4,11 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { normalizeDoi, normalizeWork, validateRequest } from "./research.js";
 
+import {
+  enrichSearchMetadata,
+  initialSearchMetadata,
+  matchesSearchFilters,
+} from "./search-metadata.js";
 import { retrieveFullText } from "./full-text.js";
 import { enrichPeerReview } from "./peer-review.js";
 
@@ -86,20 +91,49 @@ export function createServer(fetcher = fetch) {
             "query.bibliographic": [
               input.context.slice(0, 3000),
               input.keywords || "",
+              input.type === "review-article" ? "review" : "",
             ].join(" "),
-            rows: String(input.count),
+            rows: String(
+              input.language ||
+                input.type === "review-article" ||
+                input.type === "journal-article"
+                ? Math.min(100, input.count * 5)
+                : input.count,
+            ),
           });
           const filters = [];
-          if (input.type) filters.push(`type:${input.type}`);
-          if (input.from) filters.push(`from-pub-date:${input.from}`);
-          if (input.to) filters.push(`until-pub-date:${input.to}`);
+          if (input.type)
+            filters.push(
+              `type:${input.type === "review-article" ? "journal-article" : input.type}`,
+            );
+          if (input.from) filters.push(`from-pub-date:${input.from}-01-01`);
+          if (input.to) filters.push(`until-pub-date:${input.to}-12-31`);
           if (filters.length) params.set("filter", filters.join(","));
           works = (await get("?" + params)).items;
         }
-        const enriched = await enrichPeerReview(works, fetcher);
+        const classified =
+          input.mode === "find" &&
+          (input.language ||
+            ["review-article", "journal-article"].includes(input.type))
+            ? await enrichSearchMetadata(works, fetcher)
+            : works.map(initialSearchMetadata);
+        const matching =
+          input.mode === "find"
+            ? classified
+                .filter((work) => matchesSearchFilters(work, input))
+                .slice(0, input.count)
+            : classified;
+        const enriched = await enrichPeerReview(matching, fetcher);
         send(200, {
           articles: enriched.map(normalizeWork),
-          source: "Crossref; DOAJ journal policies where available",
+          source:
+            "Crossref; Europe PMC metadata and DOAJ journal policies where available",
+          note:
+            input.mode === "find" &&
+            (input.language ||
+              ["review-article", "journal-article"].includes(input.type))
+              ? `Showing ${matching.length} matches from ${works.length} screened candidates. Review and language filters depend on available publication metadata; unknown languages are excluded from language-specific results.`
+              : "",
         });
       } catch (error) {
         send(502, {

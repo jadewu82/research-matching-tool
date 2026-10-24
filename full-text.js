@@ -43,15 +43,28 @@ export async function retrieveFullText(value, fetcher = fetch) {
           signal,
           redirect: "error",
         });
+        if ([401, 402, 403, 404, 410, 451].includes(response.status))
+          return unavailable(
+            `Full text unavailable: the publisher did not provide a freely accessible article body (HTTP ${response.status}). You can import a copy you have access to.`,
+            "access_unavailable",
+            false,
+          );
         if (!response.ok)
           return unavailable(
             `Maximum Academic Press full-text download failed (HTTP ${response.status}). Please retry.`,
             "publisher_download_error",
           );
-        const sections = parseMaximumAcademicPress(
-          await limitedText(response),
-          doi,
-        );
+        const html = await limitedText(response);
+        let sections;
+        try {
+          sections = parseMaximumAcademicPress(html, doi);
+        } catch {
+          return unavailable(
+            "Full text unavailable: a readable publisher article body could not be verified. You can import a copy you have access to.",
+            "publisher_body_unavailable",
+            false,
+          );
+        }
         return {
           status: "available",
           provider: "Maximum Academic Press",
@@ -102,6 +115,12 @@ export async function retrieveFullText(value, fetcher = fetch) {
       `https://www.ebi.ac.uk/europepmc/webservices/rest/${match.pmcid}/fullTextXML`,
       { signal },
     );
+    if ([401, 402, 403, 404, 410, 451].includes(response.status))
+      return unavailable(
+        `Full text unavailable: the provider did not make the article body accessible (HTTP ${response.status}).`,
+        "access_unavailable",
+        false,
+      );
     if (!response.ok)
       return unavailable(
         `The full-text download failed (HTTP ${response.status}). Please retry or import your article-body file.`,
@@ -111,6 +130,8 @@ export async function retrieveFullText(value, fetcher = fetch) {
     if (!sections.length)
       return unavailable(
         "The full-text response did not contain a readable article body.",
+        "body_unavailable",
+        false,
       );
     return {
       status: "available",

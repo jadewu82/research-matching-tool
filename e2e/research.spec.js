@@ -421,3 +421,161 @@ test("an outdated backend is reported as a server version issue", async ({
     "The running server does not support full-text retrieval.",
   );
 });
+
+test("single article section summaries work with no dataset or comparison selection", async ({
+  page,
+}) => {
+  await page.route("**/api/articles", (route) =>
+    route.fulfill({
+      json: {
+        articles: [
+          {
+            ...article,
+            fullText: {
+              status: "available",
+              sections: [
+                {
+                  heading: "Introduction",
+                  text: "We aimed to assess plant growth.",
+                },
+                { heading: "Methods", text: "We measured 60 plants." },
+                { heading: "Results", text: "Growth increased by 8 cm." },
+                {
+                  heading: "Limitations",
+                  text: "The small sample limits generalization.",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/");
+  await page.getByLabel("Title, topic, materials, and methods").fill("Growth");
+  await expect(
+    page.getByLabel("Organized findings", { exact: true }),
+  ).not.toHaveAttribute("required", "");
+  await page.getByRole("button", { name: /Find research connections/ }).click();
+  await expect(
+    page.getByRole("button", { name: "Compare with my findings", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", {
+      name: `View section summaries for ${article.title}`,
+      exact: true,
+    })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Article section summaries",
+  });
+  for (const label of [
+    "Research focus",
+    "Study methods",
+    "Reported findings",
+    "Reported measurements",
+    "Limitations",
+  ])
+    await expect(
+      dialog.getByRole("heading", { name: label, exact: true }),
+    ).toBeVisible();
+  await expect(dialog).toContainText("60 plants");
+  await expect(dialog).toContainText("8 cm");
+});
+test("form offers separate reviews, year-only dates and language filters", async ({
+  page,
+}) => {
+  let body;
+  await page.route("**/api/articles", (route) => {
+    body = route.request().postDataJSON();
+    return route.fulfill({ json: { articles: [] } });
+  });
+  await page.goto("/");
+  await page
+    .getByLabel("Title, topic, materials, and methods")
+    .fill("Research");
+  await page
+    .getByRole("button", { name: "Refine your literature search" })
+    .click();
+  await page.getByLabel("Resource type").selectOption("review-article");
+  await page.getByLabel("From year").fill("2020");
+  await page.getByLabel("Through year").fill("2024");
+  await page.getByLabel("Article language").selectOption("fr");
+  expect(await page.locator("input[type=date]").count()).toBe(0);
+  await page.getByRole("button", { name: /Find research connections/ }).click();
+  await expect(
+    page.getByText("No connections yet", { exact: true }),
+  ).toBeVisible();
+  expect(body).toMatchObject({
+    type: "review-article",
+    language: "fr",
+    from: "2020",
+    to: "2024",
+  });
+});
+test("paywalled article shows unavailable instead of a retry button", async ({
+  page,
+}) => {
+  await page.route("**/api/articles", (route) =>
+    route.fulfill({
+      json: { articles: [{ ...article, fullText: undefined }] },
+    }),
+  );
+  await page.route("**/api/full-text", (route) =>
+    route.fulfill({
+      json: {
+        fullText: {
+          status: "unavailable",
+          code: "access_unavailable",
+          retryable: false,
+          reason: "The publisher has not made free full text available.",
+          sections: [],
+        },
+      },
+    }),
+  );
+  await page.goto("/");
+  await page.getByLabel("Title, topic, materials, and methods").fill("Growth");
+  await page.getByRole("button", { name: /Find research connections/ }).click();
+  await page
+    .getByRole("button", {
+      name: `View section summaries for ${article.title}`,
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText("Full text unavailable", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Retry full text for/ }),
+  ).toHaveCount(0);
+});
+
+test("DOI analysis without a dataset opens a single article summary on mobile", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/articles", (route) =>
+    route.fulfill({ json: { articles: [article] } }),
+  );
+  await page.goto("/");
+  await page.getByLabel("Title, topic, materials, and methods").fill("Growth");
+  await page
+    .locator("label")
+    .filter({ has: page.getByRole("radio", { name: /Analyze and compare/ }) })
+    .click();
+  await page.getByLabel("Article DOI 1", { exact: true }).fill(article.doi);
+  await page.getByRole("button", { name: "Analyze my articles" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Article section summaries" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Close summary" }).click();
+  await expect(
+    page.getByRole("button", { name: "Compare with my findings", exact: true }),
+  ).toBeDisabled();
+});

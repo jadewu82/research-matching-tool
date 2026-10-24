@@ -15,7 +15,7 @@ test("accepts DOI identifiers and DOI URLs without accepting arbitrary URLs", ()
   assert.equal(normalizeDoi("10.1234/example"), "10.1234/example");
   assert.throws(() => normalizeDoi("https://example.com/paper"));
 });
-test("requires context, organized findings and valid purpose-specific inputs", () => {
+test("validates context, optional findings and purpose-specific inputs", () => {
   const input = {
     context: "Plant growth methods",
     data: "Control: 2 cm; treatment: 4 cm",

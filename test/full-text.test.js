@@ -109,3 +109,20 @@ test("provided text excludes abstract and bibliography and requires real article
   assert.match(JSON.stringify(sections), /60 plants/);
   assert.throws(() => parseProvidedText("Abstract\nOnly a summary."));
 });
+
+test("restricted full text is unavailable without a retry action", async () => {
+  for (const status of [401, 402, 403, 404]) {
+    const result = await retrieveFullText(
+      "10.48130/fmr-0024-0018",
+      async () => ({ ok: false, status }),
+    );
+    assert.equal(result.status, "unavailable");
+    assert.equal(result.retryable, false);
+    assert.equal(result.code, "access_unavailable");
+  }
+  const transient = await retrieveFullText(
+    "10.48130/fmr-0024-0018",
+    async () => ({ ok: false, status: 503 }),
+  );
+  assert.equal(transient.retryable, true);
+});

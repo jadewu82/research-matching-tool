@@ -1,3 +1,15 @@
+export const LANGUAGES = {
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+  de: "German",
+  pt: "Portuguese",
+  zh: "Chinese",
+  ja: "Japanese",
+  it: "Italian",
+  ko: "Korean",
+  ru: "Russian",
+};
 export function normalizeDoi(value) {
   const doi = String(value)
     .trim()
@@ -9,15 +21,17 @@ export function normalizeDoi(value) {
 }
 export function validateRequest(input) {
   if (!input || typeof input !== "object") throw new Error("Invalid request.");
-  for (const key of ["context", "data"])
-    if (
-      typeof input[key] !== "string" ||
-      !input[key].trim() ||
-      input[key].length > 20000
-    )
-      throw new Error(
-        "Provide research context and organized findings (up to 20,000 characters each).",
-      );
+  if (
+    typeof input.context !== "string" ||
+    !input.context.trim() ||
+    input.context.length > 20000
+  )
+    throw new Error("Provide research context (up to 20,000 characters).");
+  if (
+    input.data !== undefined &&
+    (typeof input.data !== "string" || input.data.length > 20000)
+  )
+    throw new Error("Organized findings must be text up to 20,000 characters.");
   if (!["find", "analyze"].includes(input.mode))
     throw new Error("Choose a research purpose.");
   if (
@@ -36,17 +50,22 @@ export function validateRequest(input) {
   }
   for (const key of ["from", "to"])
     if (
-      input[key] &&
-      (!/^\d{4}-\d{2}-\d{2}$/.test(input[key]) ||
-        !Number.isFinite(Date.parse(input[key])))
+      input[key] !== undefined &&
+      input[key] !== "" &&
+      (!/^\d{4}$/.test(String(input[key])) ||
+        Number(input[key]) < 1000 ||
+        Number(input[key]) > 2999)
     )
-      throw new Error("Use valid dates.");
-  if (input.from && input.to && input.from > input.to)
-    throw new Error("The start date must precede the end date.");
+      throw new Error("Enter a four-digit publication year.");
+  if (input.from && input.to && Number(input.from) > Number(input.to))
+    throw new Error("The start year must precede the end year.");
+  if (input.language && !LANGUAGES[input.language])
+    throw new Error("Choose a supported language.");
   if (
     input.type &&
     ![
       "journal-article",
+      "review-article",
       "dissertation",
       "book",
       "proceedings-article",
@@ -76,6 +95,21 @@ export function normalizeWork(work) {
     url: `https://doi.org/${encodeURI(work.DOI)}`,
     keywords: work.subject || [],
     type: work.type || "Unknown",
+    resourceLabel:
+      work.articleKind === "review"
+        ? "Review article"
+        : work.type === "journal-article"
+          ? "Journal article"
+          : (work.type || "Unknown").replaceAll("-", " "),
+    language: work.detectedLanguage || work.language || "",
+    languageLabel:
+      LANGUAGES[work.detectedLanguage || work.language] ||
+      work.detectedLanguage ||
+      work.language ||
+      "Not supplied",
+    genreSource: work.genreSource || "Not supplied",
+    languageSource:
+      work.languageSource || (work.language ? "Crossref" : "Not supplied"),
     peerReview: work.peerReview || {
       status: "unverified",
       label: "Peer review unverified",

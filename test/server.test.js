@@ -6,6 +6,7 @@ test("HTTP workflow serves UI, searches with filters, resolves DOIs and rejects 
   const work = {
     DOI: "10.1234/example",
     title: ["Plant growth"],
+    type: "journal-article",
     abstract: "<p>Plant treatment findings.</p>",
   };
   const server = createServer(async (url) => {
@@ -45,7 +46,7 @@ test("HTTP workflow serves UI, searches with filters, resolves DOIs and rejects 
     count: 5,
     mode: "find",
     type: "journal-article",
-    from: "2020-01-01",
+    from: "2020",
   };
   const response = await post(input);
   assert.equal(response.status, 200);
@@ -60,7 +61,10 @@ test("HTTP workflow serves UI, searches with filters, resolves DOIs and rejects 
     dois: ["https://doi.org/10.1234/example"],
   });
   assert.equal(lookup.status, 200);
-  assert.match(requested[1], /10.1234%2Fexample/);
+  assert.match(
+    requested.filter((url) => url.startsWith("https://api.crossref.org"))[1],
+    /10.1234%2Fexample/,
+  );
   assert.equal((await post({ ...input, count: -1 })).status, 400);
   assert.equal((await fetch(base + "/missing")).status, 404);
 });
@@ -149,4 +153,66 @@ test("full-text endpoint accepts a DOI and returns no abstract fallback", async 
     body: JSON.stringify({ doi: "https://example.com" }),
   });
   assert.equal(bad.status, 400);
+});
+
+test("search applies review, language and inclusive year filters while accepting no dataset", async (t) => {
+  const requests = [];
+  const works = [
+    {
+      DOI: "10.1234/review",
+      type: "journal-article",
+      title: ["A systematic review"],
+      language: "en",
+    },
+    {
+      DOI: "10.1234/fr",
+      type: "journal-article",
+      title: ["A systematic review"],
+      language: "fr",
+    },
+    {
+      DOI: "10.1234/original",
+      type: "journal-article",
+      title: ["Original research"],
+      language: "en",
+    },
+  ];
+  const server = createServer(async (url) => {
+    requests.push(url);
+    return {
+      ok: true,
+      json: async () =>
+        url.startsWith("https://api.crossref.org")
+          ? { message: { items: works } }
+          : { resultList: { result: [] } },
+    };
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}/api/articles`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        context: "Research",
+        mode: "find",
+        count: 5,
+        type: "review-article",
+        language: "en",
+        from: "2020",
+        to: "2024",
+      }),
+    },
+  );
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    result.articles.map((a) => a.doi),
+    ["10.1234/review"],
+  );
+  const params = new URL(requests[0]).searchParams;
+  assert.match(params.get("filter"), /type:journal-article/);
+  assert.match(params.get("filter"), /from-pub-date:2020-01-01/);
+  assert.match(params.get("filter"), /until-pub-date:2024-12-31/);
+  assert.match(result.note, /screened/);
 });
