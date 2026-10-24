@@ -41,6 +41,8 @@ Select the `main` branch on GitHub, then **Code → Codespaces → New with opti
 
 Set the Codespace idle timeout to 15 minutes in GitHub settings. Stop it when finished; stopped Codespaces still use storage, so delete unused ones. GitHub Free personal accounts include 120 core-hours (about 60 running hours on a 2-core machine) and 15 GB-month storage monthly. Included quotas and billing depend on your account; see [GitHub's billing documentation](https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-codespaces/about-billing-for-github-codespaces). Custom container images also consume storage allowance.
 
-If startup fails, inspect `/tmp/research-matching-tool.log`, then run `bash .devcontainer/start.sh` from the repository. Rebuild changed frontend code with `npm run build`; refresh the preview after rebuilding.
+If startup fails, run `bash .devcontainer/start.sh` in the Codespace terminal and inspect the server-log path it prints (normally `/tmp/candlelit-<user-id>/server.log`) from the repository. Rebuild changed frontend code with `npm run build`; refresh the preview after rebuilding.
 
 For full-text diagnostics, `GET /api/health` reports `fullTextApiVersion: 2`. A 404 from `/api/full-text` means the running backend is outdated: pull main and rebuild/restart the Codespace container.
+
+The startup helper validates Node.js 24+, builds the frontend before launching, starts Node in a detached session, and checks both the CandleLit health endpoint and HTML page. Codespaces pins `PORT=3000` and forwards it with HTTP protocol. If startup fails, the helper prints the build/server error instead of claiming readiness. A browser 502 alone cannot diagnose the remote failure; use the terminal output. If the helper reports an older Node version, run `nvm install 24 && nvm use 24` and retry.

@@ -216,3 +216,14 @@ test("search applies review, language and inclusive year filters while accepting
   assert.match(params.get("filter"), /until-pub-date:2024-12-31/);
   assert.match(result.note, /screened/);
 });
+
+test("startup readiness identifies CandleLit rather than accepting an unrelated HTTP service", async (t) => {
+  const server = createServer();
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}/api/health`,
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).app, "CandleLit");
+});

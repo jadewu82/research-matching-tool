@@ -1,16 +1,24 @@
 {
   "name": "CandleLit",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:5.2.3-24-bookworm",
-  "hostRequirements": { "cpus": 2 },
-  "forwardPorts": [3000],
+  "hostRequirements": {
+    "cpus": 2
+  },
+  "forwardPorts": [
+    3000
+  ],
   "portsAttributes": {
     "3000": {
       "label": "CandleLit",
       "onAutoForward": "openBrowser",
-      "visibility": "private"
+      "visibility": "private",
+      "protocol": "http"
     }
   },
   "postCreateCommand": "npm ci && npm run build",
   "postStartCommand": "bash .devcontainer/start.sh",
-  "remoteUser": "node"
+  "remoteUser": "node",
+  "containerEnv": {
+    "PORT": "3000"
+  }
 }

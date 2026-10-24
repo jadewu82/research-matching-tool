@@ -7,7 +7,7 @@
     "start": "node --use-env-proxy server.js",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "test": "npm run build && node --test test/*.test.js && vitest run",
+    "test": "npm run build && node --test --test-concurrency=1 test/*.test.js && vitest run",
     "check": "node --check server.js && node --check research.js",
     "test:e2e": "npm run build && playwright test"
   },

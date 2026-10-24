@@ -22,7 +22,7 @@ export function createServer(fetcher = fetch) {
       res.end(JSON.stringify(data));
     };
     if (req.method === "GET" && req.url === "/api/health") {
-      send(200, { status: "ok", fullTextApiVersion: 2 });
+      send(200, { status: "ok", app: "CandleLit", fullTextApiVersion: 2 });
       return;
     }
     if (req.method === "POST" && req.url === "/api/full-text") {
@@ -182,7 +182,5 @@ export function createServer(fetcher = fetch) {
 }
 if (process.argv[1] === fileURLToPath(import.meta.url))
   createServer().listen(Number(process.env.PORT || 3000), "0.0.0.0", () =>
-    console.log(
-      "CandleLit listening on port " + (process.env.PORT || 3000),
-    ),
+    console.log("CandleLit listening on port " + (process.env.PORT || 3000)),
   );
