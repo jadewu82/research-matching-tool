@@ -1,0 +1,46 @@
+import http from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { normalizeDoi, normalizeWork, validateRequest } from './research.js';
+
+export function createServer(fetcher = fetch) {
+  return http.createServer(async (req, res) => {
+    const send = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); };
+    if (req.method === 'POST' && req.url === '/api/articles') {
+      let input;
+      try {
+        let body = '';
+        for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 100000) { send(413, { error: 'Request too large.' }); return; } }
+        input = JSON.parse(body); validateRequest(input);
+      } catch (error) { send(400, { error: error.message }); return; }
+      try {
+        const get = async path => {
+          const response = await fetcher(`https://api.crossref.org/works${path}`, { headers: { 'User-Agent': 'ResearchMatchingTool/0.1 (research discovery)' }, signal: AbortSignal.timeout(20000) });
+          if (!response.ok) throw new Error(response.status === 404 ? 'A DOI was not found in Crossref.' : `Literature provider returned ${response.status}. Try again later.`);
+          return (await response.json()).message;
+        };
+        let works;
+        if (input.mode === 'analyze') works = await Promise.all([...new Set(input.dois.map(normalizeDoi))].map(doi => get('/' + encodeURIComponent(doi))));
+        else {
+          const params = new URLSearchParams({ 'query.bibliographic': [input.context.slice(0, 3000), input.keywords || ''].join(' '), rows: String(input.count) });
+          const filters = [];
+          if (input.type) filters.push(`type:${input.type}`);
+          if (input.from) filters.push(`from-pub-date:${input.from}`);
+          if (input.to) filters.push(`until-pub-date:${input.to}`);
+          if (filters.length) params.set('filter', filters.join(','));
+          works = (await get('?' + params)).items;
+        }
+        send(200, { articles: works.map(normalizeWork), source: 'Crossref' });
+      } catch (error) { send(502, { error: error.name === 'TimeoutError' ? 'Crossref timed out. Please try again.' : error.message === 'fetch failed' ? 'Cannot connect to Crossref. Check network access to api.crossref.org and try again.' : error.message }); }
+      return;
+    }
+    const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/research.js': ['../research.js', 'text/javascript'] };
+    if (req.method !== 'GET' || !paths[req.url]) { send(404, { error: 'Not found' }); return; }
+    try {
+      const [path, type] = paths[req.url];
+      const content = await readFile(new URL('./public/' + path, import.meta.url));
+      res.writeHead(200, { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' }); res.end(content);
+    } catch { send(500, { error: 'Unable to load application.' }); }
+  });
+}
+if (process.argv[1] === fileURLToPath(import.meta.url)) createServer().listen(Number(process.env.PORT || 3000), '0.0.0.0', () => console.log('Research Matching Tool listening on port ' + (process.env.PORT || 3000)));

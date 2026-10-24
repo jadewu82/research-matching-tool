@@ -1,0 +1,1 @@
+{"name":"research-matching-tool","version":"0.1.0","private":true,"type":"module","scripts":{"start":"node --use-env-proxy server.js","test":"node --test","check":"node --check server.js && node --check public/app.js"},"engines":{"node":">=24"}}
