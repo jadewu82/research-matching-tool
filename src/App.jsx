@@ -1,0 +1,813 @@
+import React, { useRef, useState } from "react";
+import {
+  RadioGroup,
+  Radio,
+  Checkbox,
+  Modal,
+  ModalOverlay,
+  Dialog,
+  Heading,
+  Button as AriaButton,
+  FileTrigger,
+} from "react-aria-components";
+import {
+  BookOpen,
+  FlaskConical,
+  Search,
+  ArrowRight,
+  ArrowLeft,
+  Plus,
+  X,
+  SlidersHorizontal,
+  ShieldCheck,
+  Sparkles,
+  ExternalLink,
+  Check,
+  LoaderCircle,
+  Upload,
+  GitCompareArrows,
+  Library,
+  FileText,
+  ChevronRight,
+} from "lucide-react";
+import { Button } from "./components/ui/button";
+import { Badge } from "./components/ui/badge";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "./components/ui/accordion";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
+import { compare, validateRequest } from "../research.js";
+
+const initial = {
+  context: "",
+  data: "",
+  statistics: "",
+  count: 10,
+  type: "",
+  keywords: "",
+  from: "",
+  to: "",
+};
+function Field({ label, id, children, hint }) {
+  return (
+    <div className="field">
+      <label className="field-label" htmlFor={id}>
+        {label}
+      </label>
+      {children}
+      {hint && <p className="hint">{hint}</p>}
+    </div>
+  );
+}
+function Section({ icon: Icon, title, children }) {
+  return (
+    <section className="section">
+      <div className="section-head">
+        <Icon size={19} />
+        <h2>{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
+}
+function ComparisonCard({ title, result }) {
+  return (
+    <article className="comparison-card">
+      <h3>{title}</h3>
+      <p className="field-label">Shared terms</p>
+      <div className="badges">
+        {result.sharedTerms.length ? (
+          result.sharedTerms.map((term) => (
+            <Badge variant="secondary" key={term}>
+              {term}
+            </Badge>
+          ))
+        ) : (
+          <p className="hint">No shared terms detected.</p>
+        )}
+      </div>
+      <p className="hint">Evidence: {result.evidence}</p>
+      <p className="hint">Analysis context: {result.statistics}</p>
+      <p className="hint">{result.limitation}</p>
+    </article>
+  );
+}
+export default function App() {
+  const [form, setForm] = useState(initial),
+    [mode, setMode] = useState("find"),
+    [dois, setDois] = useState([{ id: 0, value: "" }]);
+  const nextDoi = useRef(1),
+    resultHeading = useRef(null);
+  const [page, setPage] = useState("setup"),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [fileName, setFileName] = useState("");
+  const [articles, setArticles] = useState([]),
+    [selected, setSelected] = useState(new Set()),
+    [sort, setSort] = useState("relevance"),
+    [experiment, setExperiment] = useState(null),
+    [comparison, setComparison] = useState(null);
+  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const input = (key, props = {}) => (
+    <input
+      className="input"
+      id={key}
+      value={form[key]}
+      onChange={(e) => set(key, e.target.value)}
+      {...props}
+    />
+  );
+  const chosen = articles.filter((article) => selected.has(article.doi));
+  const ordered = [...articles].sort((a, b) =>
+    sort === "title"
+      ? a.title.localeCompare(b.title)
+      : sort === "date"
+        ? (b.year || 0) - (a.year || 0)
+        : 0,
+  );
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    const request = {
+      ...form,
+      mode,
+      count: Number(form.count),
+      dois: dois.map((row) => row.value.trim()).filter(Boolean),
+    };
+    if (mode === "analyze")
+      Object.assign(request, { type: "", keywords: "", from: "", to: "" });
+    try {
+      validateRequest(request);
+    } catch (err) {
+      setError(err.message);
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload = {
+        ...request,
+        data: "Organized findings retained in browser.",
+        statistics: "",
+      };
+      if (mode === "analyze") payload.context = "User-provided DOI lookup";
+      const response = await fetch("/api/articles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Unable to retrieve articles.");
+      setArticles(result.articles);
+      setSelected(
+        new Set(mode === "analyze" ? result.articles.map((a) => a.doi) : []),
+      );
+      setSort("relevance");
+      setExperiment(request);
+      setPage("results");
+      if (mode === "analyze" && result.articles.length)
+        setComparison("experiment");
+      setTimeout(() => resultHeading.current?.focus(), 0);
+    } catch (err) {
+      setError(err.message || "Unable to retrieve articles. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function upload(files) {
+    const file = files?.[0];
+    if (!file) return;
+    if (file.size > 20000 || !/\.(txt|csv|tsv)$/i.test(file.name)) {
+      setError("Choose a .txt, .csv or .tsv file smaller than 20 KB.");
+      return;
+    }
+    try {
+      set("data", await file.text());
+      setFileName(file.name);
+      setError("");
+    } catch {
+      setError("Unable to read that file. Please try again.");
+    }
+  }
+  function toggle(doi, value) {
+    setSelected((previous) => {
+      const next = new Set(previous);
+      value ? next.add(doi) : next.delete(doi);
+      return next;
+    });
+  }
+  const panels = [];
+  if (comparison === "experiment" && experiment)
+    for (const article of chosen)
+      panels.push({
+        key: article.doi,
+        title: article.title,
+        result: compare(
+          article,
+          experiment.context,
+          experiment.data,
+          experiment.statistics,
+        ),
+      });
+  if (comparison === "articles")
+    for (let i = 0; i < chosen.length; i++)
+      for (let j = i + 1; j < chosen.length; j++)
+        panels.push({
+          key: `${i}-${j}`,
+          title: `${chosen[i].title} ↔ ${chosen[j].title}`,
+          result: compare(chosen[i], chosen[j].title, chosen[j].abstract),
+        });
+  return (
+    <>
+      <header className="topbar">
+        <div className="shell">
+          <a
+            className="brand"
+            href="/"
+            onClick={(event) => {
+              event.preventDefault();
+              setPage("setup");
+            }}
+          >
+            <span className="brand-icon">
+              <Library size={22} />
+            </span>
+            Research Matching Tool
+          </a>
+          <span className="topnote">A LITTLE CONTEXT. A NEW CONNECTION.</span>
+        </div>
+      </header>
+      <main className="shell">
+        {page === "setup" ? (
+          <>
+            <div className="hero">
+              <div>
+                <p className="eyebrow">YOUR NEXT RESEARCH CONNECTION</p>
+                <h1>
+                  Put your findings
+                  <br />
+                  in context.
+                </h1>
+                <p className="intro">
+                  Find relevant literature, explore published findings, and see
+                  how your experiment connects. More time for discovery. Less
+                  time searching.
+                </p>
+              </div>
+              <aside className="insight">
+                <Sparkles size={24} />
+                <p className="serif text-xl!">
+                  Good research starts
+                  <br />
+                  with better questions.
+                </p>
+                <p>
+                  Explore the evidence around your work. This tool helps you
+                  find and read sources, never write your paper.
+                </p>
+              </aside>
+            </div>
+            <div className="workspace">
+              <aside className="steps" aria-label="Form sections">
+                <p className="eyebrow">YOUR RESEARCH BRIEF</p>
+                {[
+                  "Research context",
+                  "Your purpose",
+                  "Organized findings",
+                  "Analysis & filters",
+                ].map((label, i) => (
+                  <div
+                    className={`step ${i === 0 || (form.context && i === 1) || (form.data && i === 2) ? "active" : ""}`}
+                    key={label}
+                  >
+                    <span>{i + 1}</span>
+                    {label}
+                  </div>
+                ))}
+                <p className="hint mt-6">
+                  No account required.
+                  <br />
+                  Your findings stay in this browser.
+                </p>
+              </aside>
+              <form className="surface" onSubmit={submit} aria-busy={busy}>
+                <Section
+                  icon={FlaskConical}
+                  title="01 · Tell us about your research"
+                >
+                  <Field
+                    label="Title, topic, materials, and methods"
+                    id="context"
+                    hint="Include the details that make your experiment distinct."
+                  >
+                    <textarea
+                      className="textarea"
+                      id="context"
+                      required
+                      maxLength={20000}
+                      value={form.context}
+                      onChange={(e) => set("context", e.target.value)}
+                      placeholder="What are you investigating? Describe your research question, materials, and approach…"
+                    />
+                  </Field>
+                </Section>
+                <Section icon={Search} title="02 · What would you like to do?">
+                  <RadioGroup
+                    aria-label="Research purpose"
+                    value={mode}
+                    onChange={setMode}
+                    className="mode-group"
+                  >
+                    <Radio value="find" className="mode-card">
+                      <span className="radio-dot" />
+                      <span>
+                        Find articles
+                        <small>
+                          Discover literature relevant to your experiment
+                        </small>
+                      </span>
+                    </Radio>
+                    <Radio value="analyze" className="mode-card">
+                      <span className="radio-dot" />
+                      <span>
+                        Analyze and compare articles
+                        <small>Explore the articles you already have</small>
+                      </span>
+                    </Radio>
+                  </RadioGroup>
+                  {mode === "analyze" && (
+                    <div>
+                      <p className="hint mt-4">
+                        Add up to 20 DOIs or doi.org URLs.
+                      </p>
+                      {dois.map((row, i) => (
+                        <div className="doi-row" key={row.id}>
+                          <Field
+                            label={`Article DOI ${i + 1}`}
+                            id={`doi-${row.id}`}
+                          >
+                            <input
+                              className="input"
+                              id={`doi-${row.id}`}
+                              required
+                              maxLength={500}
+                              value={row.value}
+                              onChange={(e) =>
+                                setDois((rows) =>
+                                  rows.map((item) =>
+                                    item.id === row.id
+                                      ? { ...item, value: e.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                              placeholder="10.1234/example or https://doi.org/…"
+                            />
+                          </Field>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Remove article DOI ${i + 1}`}
+                            disabled={dois.length === 1}
+                            onClick={() =>
+                              setDois((rows) =>
+                                rows.filter((item) => item.id !== row.id),
+                              )
+                            }
+                          >
+                            <X size={17} />
+                          </Button>
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={dois.length >= 20}
+                        onClick={() =>
+                          setDois((rows) => [
+                            ...rows,
+                            { id: nextDoi.current++, value: "" },
+                          ])
+                        }
+                      >
+                        <Plus size={16} /> Add another article
+                      </Button>
+                    </div>
+                  )}
+                </Section>
+                <Section
+                  icon={FileText}
+                  title="03 · Share your organized findings"
+                >
+                  <Field
+                    label="Organized findings"
+                    id="data"
+                    hint="Paste a results table, graph description, or summarized findings. Use organized results rather than raw observations."
+                  >
+                    <textarea
+                      className="textarea"
+                      id="data"
+                      required
+                      maxLength={20000}
+                      value={form.data}
+                      onChange={(e) => set("data", e.target.value)}
+                      placeholder={
+                        "Treatment | Mean growth (cm) | SD | n\nControl | 12.4 | 1.8 | 20\nTreatment A | 15.2 | 2.1 | 20"
+                      }
+                    />
+                  </Field>
+                  <div className="upload">
+                    <Upload size={19} />
+                    <div>
+                      <FileTrigger
+                        acceptedFileTypes={[".txt", ".csv", ".tsv"]}
+                        onSelect={upload}
+                      >
+                        <AriaButton className="text-sm font-medium underline underline-offset-4">
+                          Import an organized data file
+                        </AriaButton>
+                      </FileTrigger>
+                      <p className="hint">
+                        {fileName || "TXT, CSV or TSV · up to 20 KB"}
+                      </p>
+                    </div>
+                  </div>
+                </Section>
+                <Section
+                  icon={SlidersHorizontal}
+                  title="04 · A little more context"
+                >
+                  <Field
+                    label="Statistical software and analysis methods (optional)"
+                    id="statistics"
+                  >
+                    {input("statistics", {
+                      maxLength: 2000,
+                      placeholder: "e.g. R, two-way ANOVA, Tukey post-hoc test",
+                    })}
+                  </Field>
+                  {mode === "find" && (
+                    <>
+                      <Field label="Suggested articles (1–50)" id="count">
+                        {input("count", {
+                          type: "number",
+                          min: 1,
+                          max: 50,
+                          required: true,
+                        })}
+                      </Field>
+                      <Accordion type="single" collapsible>
+                        <AccordionItem value="filters">
+                          <AccordionTrigger>
+                            Refine your literature search
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <div className="two-col">
+                              <Field label="Resource type" id="type">
+                                <select
+                                  className="input"
+                                  id="type"
+                                  value={form.type}
+                                  onChange={(e) => set("type", e.target.value)}
+                                >
+                                  <option value="">All resources</option>
+                                  <option value="journal-article">
+                                    Journal articles (includes reviews)
+                                  </option>
+                                  <option value="dissertation">
+                                    Dissertations
+                                  </option>
+                                  <option value="book">Books</option>
+                                  <option value="proceedings-article">
+                                    Conference papers
+                                  </option>
+                                </select>
+                              </Field>
+                              <Field label="Keywords" id="keywords">
+                                {input("keywords", {
+                                  maxLength: 500,
+                                  placeholder: "e.g. drought, chlorophyll",
+                                })}
+                              </Field>
+                              <Field label="Published from" id="from">
+                                {input("from", { type: "date" })}
+                              </Field>
+                              <Field label="Published through" id="to">
+                                {input("to", { type: "date" })}
+                              </Field>
+                            </div>
+                            <p className="hint">
+                              Crossref does not reliably identify review
+                              articles or verify peer review. Check these
+                              details with the publisher.
+                            </p>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    </>
+                  )}
+                </Section>
+                <div className="section">
+                  {error && (
+                    <div className="error" role="alert">
+                      {error}
+                    </div>
+                  )}
+                  <div className="submit-row">
+                    <span className="privacy">
+                      <ShieldCheck size={16} /> Your findings stay private
+                    </span>
+                    <Button type="submit" size="lg" disabled={busy}>
+                      {busy ? (
+                        <>
+                          <LoaderCircle className="spinner" size={17} />{" "}
+                          Searching literature…
+                        </>
+                      ) : (
+                        <>
+                          {mode === "find"
+                            ? "Find research connections"
+                            : "Analyze my articles"}
+                          <ArrowRight size={17} />
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <p className="hint mt-4">
+                    Only research context and keywords are sent to Crossref for
+                    discovery. Summaries use available abstracts; comparisons
+                    guide reading, not scientific conclusions.
+                  </p>
+                  {busy && (
+                    <div role="status" className="hint">
+                      Retrieving publisher metadata. This may take up to 20
+                      seconds.
+                    </div>
+                  )}
+                </div>
+              </form>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="hero">
+              <div>
+                <p className="eyebrow">YOUR LITERATURE WORKSPACE</p>
+                <h1 tabIndex={-1} ref={resultHeading}>
+                  Connections worth
+                  <br />
+                  exploring.
+                </h1>
+                <p className="intro">
+                  Follow the evidence. Select useful references, explore their
+                  abstracts, and compare perspectives with your findings.
+                </p>
+              </div>
+              <aside className="insight">
+                <BookOpen size={24} />
+                <p className="serif text-xl!">
+                  {articles.length} research connections
+                </p>
+                <p>
+                  Results from Crossref. Relevance reflects your research brief,
+                  not the strength of scientific evidence.
+                </p>
+              </aside>
+            </div>
+            <nav className="result-nav">
+              <Button variant="ghost" onClick={() => setPage("setup")}>
+                <ArrowLeft size={15} /> Edit research brief
+              </Button>
+              <ChevronRight size={13} /> Literature results
+            </nav>
+            <div className="result-toolbar">
+              <p className="text-sm m-0" role="status">
+                {articles.length} articles found · {selected.size} selected
+              </p>
+              <label className="sort">
+                Sort by{" "}
+                <select value={sort} onChange={(e) => setSort(e.target.value)}>
+                  <option value="relevance">Relevance</option>
+                  <option value="date">Newest first</option>
+                  <option value="title">Title A–Z</option>
+                </select>
+              </label>
+            </div>
+            <div className="result-grid">
+              <div>
+                {!articles.length ? (
+                  <div className="surface empty">
+                    <Search size={35} />
+                    <h2 className="serif text-2xl">No connections yet</h2>
+                    <p className="hint">
+                      Try broader keywords or a wider publication date range.
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="mt-5"
+                      onClick={() => setPage("setup")}
+                    >
+                      Adjust your research brief
+                    </Button>
+                  </div>
+                ) : (
+                  ordered.map((article) => (
+                    <article
+                      className={`surface article ${selected.has(article.doi) ? "selected" : ""}`}
+                      key={article.doi}
+                    >
+                      <div className="article-top">
+                        <Badge variant="secondary">
+                          {article.type?.replaceAll("-", " ") || "Research"}
+                        </Badge>
+                        <Checkbox
+                          aria-label={`Select ${article.title}`}
+                          isSelected={selected.has(article.doi)}
+                          onChange={(value) => toggle(article.doi, value)}
+                          className="check"
+                        >
+                          {({ isSelected }) => (
+                            <>
+                              <span className="check-box">
+                                {isSelected && <Check size={13} />}
+                              </span>
+                              {isSelected ? "Selected" : "Select article"}
+                            </>
+                          )}
+                        </Checkbox>
+                      </div>
+                      <h2>{article.title}</h2>
+                      <p className="metadata">
+                        {article.authors} · {article.year || "Date unavailable"}
+                      </p>
+                      <div className="badges">
+                        {article.keywords?.map((keyword) => (
+                          <Badge key={keyword} variant="outline">
+                            {keyword}
+                          </Badge>
+                        ))}
+                      </div>
+                      <Accordion
+                        type="single"
+                        collapsible
+                        defaultValue={
+                          experiment.mode === "analyze" ? "abstract" : undefined
+                        }
+                      >
+                        <AccordionItem value="abstract">
+                          <AccordionTrigger>Abstract summary</AccordionTrigger>
+                          <AccordionContent>
+                            <p className="summary-text">{article.summary}</p>
+                            <p className="hint">
+                              {article.summarySource ||
+                                "Extract from publisher-deposited abstract; not a full-text summary."}
+                            </p>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                      <div className="flex justify-between items-center mt-4 gap-3">
+                        <span className="hint m-0">Peer review: unknown</span>
+                        <Button variant="ghost" size="sm" asChild>
+                          <a
+                            href={article.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Publisher source <ExternalLink size={14} />
+                          </a>
+                        </Button>
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+              <aside className="surface selection-panel">
+                <GitCompareArrows size={22} />
+                <h2 className="mt-4">Your reading collection</h2>
+                <p className="count">{selected.size}</p>
+                <p className="hint">articles selected for comparison</p>
+                <div className="flex gap-2 mt-4">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!articles.length}
+                    onClick={() =>
+                      setSelected(new Set(articles.map((a) => a.doi)))
+                    }
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!selected.size}
+                    onClick={() => setSelected(new Set())}
+                  >
+                    Clear
+                  </Button>
+                </div>
+                <hr className="border-border my-5" />
+                <Button
+                  disabled={!chosen.length}
+                  onClick={() => setComparison("experiment")}
+                >
+                  Compare with my findings
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={chosen.length < 2}
+                  onClick={() => setComparison("articles")}
+                >
+                  Compare articles
+                </Button>
+                <p className="hint mt-4">
+                  Select two or more articles to compare them with each other.
+                  Textual overlap is a starting point for reading, not evidence
+                  of agreement.
+                </p>
+              </aside>
+            </div>
+          </>
+        )}
+      </main>
+      <ModalOverlay
+        isOpen={!!comparison}
+        onOpenChange={(open) => {
+          if (!open) setComparison(null);
+        }}
+        isDismissable
+      >
+        <Modal>
+          <Dialog
+            className="dialog"
+            aria-label={
+              comparison === "articles"
+                ? "Article-to-article comparison"
+                : "Literature and your findings"
+            }
+          >
+            <div className="dialog-header">
+              <div>
+                <p className="eyebrow">EXPLORE THE CONNECTIONS</p>
+                <Heading slot="title">
+                  {comparison === "articles"
+                    ? "Articles in conversation"
+                    : "Literature and your findings"}
+                </Heading>
+              </div>
+              <AriaButton
+                className="rounded-md p-2 hover:bg-secondary"
+                aria-label="Close comparison"
+                onPress={() => setComparison(null)}
+              >
+                <X size={21} />
+              </AriaButton>
+            </div>
+            <Tabs defaultValue="connections">
+              <TabsList>
+                <TabsTrigger value="connections">Connections</TabsTrigger>
+                <TabsTrigger value="evidence">Evidence & limits</TabsTrigger>
+              </TabsList>
+              <TabsContent value="connections">
+                {comparison === "experiment" && experiment && (
+                  <>
+                    <p className="field-label mt-5">Your organized findings</p>
+                    <pre className="findings">{experiment.data}</pre>
+                  </>
+                )}
+                {panels.map((panel) => (
+                  <ComparisonCard key={panel.key} {...panel} />
+                ))}
+              </TabsContent>
+              <TabsContent value="evidence">
+                <div className="comparison-card">
+                  <h3>What this comparison can tell you</h3>
+                  <p className="summary-text">
+                    Connections are shared terms from titles and available
+                    abstracts. They help you find passages worth investigating;
+                    they do not establish scientific agreement, causality, or
+                    comparable effect sizes.
+                  </p>
+                  <p className="hint">
+                    Read the full methods, populations, controls, units, and
+                    uncertainty before interpreting differences. Abstract
+                    extracts may omit important limitations. Statistical
+                    software is recorded as context and is not executed.
+                  </p>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
+      <footer>
+        Research Matching Tool · Find sources. Explore context. Keep your
+        scientific judgment.
+      </footer>
+    </>
+  );
+}
