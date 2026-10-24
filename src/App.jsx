@@ -181,6 +181,13 @@ function ArticleComparison({ first, second }) {
             ))}
           </div>
         )}
+      {(result.left.isReview || result.right.isReview) && (
+        <p className="hint">
+          A selected source is a review article. Its methods, findings and
+          measurements describe the literature it reviews and should not be
+          treated as one original experiment.
+        </p>
+      )}
       <p className="hint">
         Section summaries use the retrieved full article body, including
         available tables and figure captions. Abstracts are excluded. Summaries
@@ -1173,8 +1180,9 @@ export default function App() {
                   </p>
                   <p className="hint">
                     Coverage is currently limited to open-access full text
-                    available through Europe PMC or full text you import.
-                    Imported content is provided by you and is not independently
+                    available through Europe PMC, supported Maximum Academic
+                    Press article pages, or full text you import. Imported
+                    content is provided by you and is not independently
                     verified. Section summaries are extractive and may omit
                     details. Check the linked full text before interpreting
                     differences. Statistical software is recorded as context and

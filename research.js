@@ -122,40 +122,51 @@ export function articleEvidence(article) {
       ? article.fullText.sections || []
       : [];
   const full = sections.flatMap((section) =>
-    sentences(section.text).map((text) => ({
-      text,
-      heading: section.heading,
-      type: section.type,
-    })),
+    sentences(section.text)
+      .filter((text) => !/^(?:Figure|Fig\.?|Table)\s+\d+\.?$/i.test(text))
+      .map((text) => ({
+        text,
+        heading: section.heading,
+        type: section.type,
+      })),
   );
   const summary = (
     headingPattern,
     sentencePattern,
     fallback = false,
     excludePattern = /$^/,
+    preferNumbers = true,
   ) => {
     const headed = full.filter((s) =>
       headingPattern.test(`${s.heading} ${s.type || ""}`),
     );
-    const pool = headed.length
-      ? headed
+    const matchingHeaded = headed.filter((s) => sentencePattern.test(s.text));
+    let pool = headed.length
+      ? matchingHeaded.length
+        ? matchingHeaded
+        : headed
       : full.filter(
           (s) =>
             !excludePattern.test(`${s.heading} ${s.type || ""}`) &&
             sentencePattern.test(s.text),
         );
+    if (
+      fallback &&
+      pool.some((sentence) => sentencePattern.test(sentence.text))
+    )
+      pool = pool.filter((sentence) => sentencePattern.test(sentence.text));
     const prioritized = pool
       .map((sentence, index) => ({
         ...sentence,
         index,
         score:
           (sentencePattern.test(sentence.text) ? 3 : 0) +
-          (/\b(we (?:aim|hypothes|investigat|evaluat|assess)|(?:this|our) study|our (?:objective|aim)|we note.*limitation)/i.test(
+          (/\b(we (?:aim|hypothes|investigat|evaluat|assess)|(?:this|our) (?:study|review|work|paper)|our (?:objective|aim)|we note.*limitation)/i.test(
             sentence.text,
           )
             ? 7
             : 0) +
-          (/\d/.test(sentence.text) ? 1 : 0),
+          (preferNumbers && /\d/.test(sentence.text) ? 1 : 0),
       }))
       .sort((a, b) => b.score - a.score || a.index - b.index)
       .slice(0, 3)
@@ -183,26 +194,27 @@ export function articleEvidence(article) {
   const fields = {
     focus: summary(
       /intro|background|objective|aim/i,
-      /\b(aim|objective|hypothes|investigat|purpose|research question)/i,
+      /\b(this review|this study|this work|aim|objective|hypothes|investigat|purpose|research question)/i,
       true,
     ),
     methods: summary(
-      /method|material|experimental|protocol|data extraction|eligibility|statistical analysis/i,
-      /\b(randomi[sz]|assay|microscop|cohort|regression|anova|survey|interview|we used|we analy[sz])/i,
+      /method|material|experimental|protocol|data extraction|eligibility|statistical analysis|detection mode|detection strateg|label.free detection|labeled detection/i,
+      /\b(method|technique|strateg|labeled|label.free|recognition|Raman signals|randomi[sz]|assay|microscop|cohort|regression|anova|survey|interview|we used|we analy[sz])/i,
       false,
       /result|discussion|conclu|intro|background/i,
+      false,
     ),
     findings: summary(
-      /result|finding|conclu/i,
-      /\b(found|show|increas|decreas|associat|significan|observ|improv|reduc)/i,
+      /result|finding|conclu|^summary\b/i,
+      /\b(found|show|increas|decreas|associat|significan|observ|improv|reduc|predominant|summari[sz]|demonstrat)/i,
     ),
     measurements: summary(
       /measure|table|outcome/i,
       /\d+(?:\.\d+)?\s*(?:%|cm\b|mm\b|mg\b|kg\b|ml\b|nm\b|°|plants?\b|patients?\b|participants?\b)|\bp\s*[<=>]\s*\d|confidence interval|effect size/i,
     ),
     limitations: summary(
-      /limitation|caveat/i,
-      /\b(limit|small sample|uncertain|bias|caution|further research|future work)/i,
+      /limitation|caveat|challenge|future perspective|^summary\b/i,
+      /\b(limitations?|(?:is|are|was|were) limited by|limits? (?:generalization|practical|clinical|the|its|their|our|application)|small sample|uncertain|bias|caution|challenge|bottleneck|drawback|lack|poor|weak|difficulty|existing problems|further research|future work)/i,
       false,
       /intro|background/i,
     ),
@@ -224,6 +236,11 @@ export function articleEvidence(article) {
     fullTextSourceUrl: article.fullText?.sourceUrl,
     sourceProvider: article.fullText?.provider || "",
     supplied: !!article.fullText?.supplied,
+    isReview: full.some(
+      (s) =>
+        /intro|article body/i.test(s.heading) &&
+        /\bthis review\b/i.test(s.text),
+    ),
     fullTextMessage:
       article.fullText?.reason ||
       "Full text unavailable. Retrieve accessible full text to populate section summaries.",

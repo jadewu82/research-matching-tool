@@ -1,5 +1,6 @@
 import { parseFullText } from "./full-text-parser.js";
 export { parseFullText } from "./full-text-parser.js";
+import { parseMaximumAcademicPress } from "./publisher-full-text.js";
 import { normalizeDoi } from "./research.js";
 
 async function limitedText(response) {
@@ -35,6 +36,36 @@ export async function retrieveFullText(value, fetcher = fetch) {
     });
   const signal = AbortSignal.timeout(20000);
   try {
+    if (/^10\.48130\/[a-z0-9.-]+$/i.test(doi)) {
+      const sourceUrl = `https://www.maxapress.com/article/doi/${doi.split("/").map(encodeURIComponent).join("/")}`;
+      try {
+        const response = await fetcher(sourceUrl, {
+          signal,
+          redirect: "error",
+        });
+        if (!response.ok)
+          return unavailable(
+            `Maximum Academic Press full-text download failed (HTTP ${response.status}). Please retry.`,
+            "publisher_download_error",
+          );
+        const sections = parseMaximumAcademicPress(
+          await limitedText(response),
+          doi,
+        );
+        return {
+          status: "available",
+          provider: "Maximum Academic Press",
+          sourceUrl,
+          retrievedAt: new Date().toISOString(),
+          sections,
+        };
+      } catch {
+        return unavailable(
+          "Maximum Academic Press full text could not be downloaded or its article body could not be verified. Please retry or import your article-body file.",
+          "publisher_full_text_error",
+        );
+      }
+    }
     const params = new URLSearchParams({
       query: `DOI:"${doi.replaceAll('"', "")}"`,
       format: "json",
