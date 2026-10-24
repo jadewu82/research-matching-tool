@@ -34,3 +34,11 @@ Organized findings and statistics remain in browser memory; search context and k
 Use feature branches and pull requests; keep main protected in repository settings. Add a failing behavioral test first, implement the change, then run tests and syntax checks before review. CI runs the same checks. Tests cover validation, metadata, comparison limits, HTTP/provider behavior and React interactions using deterministic fixtures. Browser tests cover desktop discovery, mobile DOI analysis, keyboard dialog dismissal, and provider errors. Run `npm run test:e2e` after installing Chromium with `npx playwright install chromium`; use `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium` when using a system browser. Live provider checks are separate from automated tests.
 
 Before public deployment add rate limiting, operational monitoring and a privacy review. Richer evidence-based summaries and method/effect-size comparison require a separate full-text retrieval and analysis design with source attribution.
+
+## GitHub Codespaces browser preview
+
+Select the `feature/codespaces-preview` branch on GitHub, then **Code → Codespaces → New with options** and choose a **2-core** machine. Confirm your personal account has remaining included usage before creating it. The dev container installs Node.js 24 dependencies, builds the frontend, starts the app on creation and resume, and forwards port 3000 privately. Open the **Ports** panel and choose **Open in Browser** for **Research Matching Tool** if the browser does not open automatically. Keep port visibility private.
+
+Set the Codespace idle timeout to 15 minutes in GitHub settings. Stop it when finished; stopped Codespaces still use storage, so delete unused ones. GitHub Free personal accounts include 120 core-hours (about 60 running hours on a 2-core machine) and 15 GB-month storage monthly. Included quotas and billing depend on your account; see [GitHub's billing documentation](https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-codespaces/about-billing-for-github-codespaces). Custom container images also consume storage allowance.
+
+If startup fails, inspect `/tmp/research-matching-tool.log`, then run `bash .devcontainer/start.sh` from the repository. Rebuild changed frontend code with `npm run build`; refresh the preview after rebuilding.

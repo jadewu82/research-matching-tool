@@ -1,0 +1,16 @@
+{
+  "name": "Research Matching Tool",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:5.2.3-24-bookworm",
+  "hostRequirements": { "cpus": 2 },
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "Research Matching Tool",
+      "onAutoForward": "openBrowser",
+      "visibility": "private"
+    }
+  },
+  "postCreateCommand": "npm ci && npm run build",
+  "postStartCommand": "bash .devcontainer/start.sh",
+  "remoteUser": "node"
+}
